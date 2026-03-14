@@ -15,3 +15,7 @@ export { DataTable, dataTablePlugin, type DataTableConfig } from './charts/DataT
 
 // Auto-viz
 export { selectVisualization, type ColumnInfo, type VizRecommendation } from './auto-viz';
+
+// View spec
+export { chartSpecSchema, controlSpecSchema, viewSpecSchema } from './view-spec';
+export type { ChartSpec, ControlSpec, ControlType, ViewSpec } from './view-spec';

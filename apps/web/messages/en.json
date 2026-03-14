@@ -57,5 +57,14 @@
     "registerPrompt": "Already have an account?",
     "invalidCredentials": "Invalid email or password.",
     "emailInUse": "An account with this email already exists."
+  },
+  "view": {
+    "loading": "Loading data...",
+    "updating": "Updating...",
+    "queryError": "Query failed",
+    "unknownChartType": "Unknown chart type: {type}"
+  },
+  "controls": {
+    "selectPlaceholder": "Select..."
   }
 }
