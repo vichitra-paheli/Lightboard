@@ -1,6 +1,6 @@
 import { dataSources } from '@lightboard/db/schema';
 import { eq, and } from 'drizzle-orm';
-import { NextResponse, type NextRequest } from 'next/server';
+import { NextResponse } from 'next/server';
 import { withAuth } from '@/lib/auth';
 
 /** DELETE /api/data-sources/[id] — Delete a data source. */

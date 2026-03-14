@@ -1,8 +1,8 @@
-import { dataSources, organizations } from '@lightboard/db/schema';
+import { dataSources } from '@lightboard/db/schema';
 import { encryptCredentials } from '@lightboard/db/crypto';
 import { eq } from 'drizzle-orm';
-import { NextResponse, type NextRequest } from 'next/server';
-import { getAdminDb, withAuth } from '@/lib/auth';
+import { NextResponse } from 'next/server';
+import { withAuth } from '@/lib/auth';
 
 /** GET /api/data-sources — List all data sources for the current org. */
 export const GET = withAuth(async (_req, { db, orgId }) => {
@@ -45,7 +45,7 @@ export const POST = withAuth(async (req, { db, orgId }) => {
     .values({
       orgId,
       name,
-      type: type as any,
+      type: type as 'postgres' | 'mysql' | 'clickhouse' | 'rest' | 'csv' | 'prometheus' | 'elasticsearch',
       config: { host: connection.host, port: connection.port, database: connection.database },
       credentials: encrypted,
     })
