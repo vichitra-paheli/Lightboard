@@ -2,7 +2,7 @@
 
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Link, useTransitionRouter } from 'next-view-transitions';
+import { Link } from 'next-view-transitions';
 import {
   Compass,
   Database,
@@ -37,13 +37,12 @@ const NAV_ITEMS: NavItem[] = [
  */
 export function Sidebar() {
   const pathname = usePathname();
-  const router = useTransitionRouter();
   const t = useTranslations('nav');
 
   async function handleLogout() {
     await fetch('/api/auth/logout', { method: 'POST' });
-    router.push('/login');
-    router.refresh();
+    // Use hard navigation to clear all client state and let middleware redirect
+    window.location.href = '/login';
   }
 
   return (
