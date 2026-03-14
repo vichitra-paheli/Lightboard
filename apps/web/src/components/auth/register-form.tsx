@@ -12,7 +12,7 @@ import {
   Label,
 } from '@lightboard/ui';
 import { useTranslations } from 'next-intl';
-import Link from 'next/link';
+import { Link } from 'next-view-transitions';
 import { useState } from 'react';
 
 /** Props for the RegisterForm component. */

@@ -1,14 +1,14 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
-import { useRouter } from 'next/navigation';
+import { useTransitionRouter } from 'next-view-transitions';
 import { useState } from 'react';
 import { RegisterForm } from '@/components/auth/register-form';
 
 /** Register page. */
 export default function RegisterPage() {
   const t = useTranslations('auth');
-  const router = useRouter();
+  const router = useTransitionRouter();
   const [error, setError] = useState('');
 
   async function handleRegister(data: {

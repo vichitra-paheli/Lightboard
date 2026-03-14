@@ -1,14 +1,14 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
-import { useRouter } from 'next/navigation';
+import { useTransitionRouter } from 'next-view-transitions';
 import { useState } from 'react';
 import { LoginForm } from '@/components/auth/login-form';
 
 /** Login page. */
 export default function LoginPage() {
   const t = useTranslations('auth');
-  const router = useRouter();
+  const router = useTransitionRouter();
   const [error, setError] = useState('');
 
   async function handleLogin(email: string, password: string) {

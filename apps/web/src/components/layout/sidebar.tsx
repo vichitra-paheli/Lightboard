@@ -1,8 +1,8 @@
 'use client';
 
-import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+import { Link, useTransitionRouter } from 'next-view-transitions';
 import {
   Compass,
   Database,
@@ -12,8 +12,6 @@ import {
   Settings,
   SquareKanban,
 } from 'lucide-react';
-
-import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 
 /**
@@ -39,7 +37,7 @@ const NAV_ITEMS: NavItem[] = [
  */
 export function Sidebar() {
   const pathname = usePathname();
-  const router = useRouter();
+  const router = useTransitionRouter();
   const t = useTranslations('nav');
 
   async function handleLogout() {
