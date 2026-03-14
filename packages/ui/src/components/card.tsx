@@ -3,13 +3,18 @@ import { cn } from '../utils';
 
 /** A styled card container. */
 export const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
-  ({ className, ...props }, ref) => (
+  ({ className, style, ...props }, ref) => (
     <div
       ref={ref}
-      className={cn(
-        'rounded-lg border border-neutral-200 bg-white text-neutral-950 shadow-sm dark:border-neutral-800 dark:bg-neutral-950 dark:text-neutral-50',
-        className,
-      )}
+      className={cn('rounded-lg shadow-sm', className)}
+      style={{
+        backgroundColor: 'var(--color-card)',
+        color: 'var(--color-card-foreground)',
+        borderWidth: '1px',
+        borderStyle: 'solid',
+        borderColor: 'var(--color-border)',
+        ...style,
+      }}
       {...props}
     />
   ),
@@ -34,8 +39,13 @@ CardTitle.displayName = 'CardTitle';
 
 /** Card description element. */
 export const CardDescription = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLParagraphElement>>(
-  ({ className, ...props }, ref) => (
-    <p ref={ref} className={cn('text-sm text-neutral-500 dark:text-neutral-400', className)} {...props} />
+  ({ className, style, ...props }, ref) => (
+    <p
+      ref={ref}
+      className={cn('text-sm', className)}
+      style={{ color: 'var(--color-muted-foreground)', ...style }}
+      {...props}
+    />
   ),
 );
 CardDescription.displayName = 'CardDescription';

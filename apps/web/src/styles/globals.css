@@ -1,5 +1,7 @@
 @import 'tailwindcss';
 
+@source "../../../../packages/ui/src/**/*.{ts,tsx}";
+
 @theme {
   /* Colors - Background */
   --color-background: oklch(1 0 0);
@@ -61,12 +63,13 @@
   }
 }
 
-.dark {
+@media (prefers-color-scheme: dark) {
+:root {
   --color-background: oklch(0.145 0 0);
   --color-foreground: oklch(0.985 0 0);
   --color-muted: oklch(0.269 0 0);
   --color-muted-foreground: oklch(0.708 0 0);
-  --color-card: oklch(0.205 0 0);
+  --color-card: oklch(0.22 0 0);
   --color-card-foreground: oklch(0.985 0 0);
   --color-popover: oklch(0.205 0 0);
   --color-popover-foreground: oklch(0.985 0 0);
@@ -80,8 +83,8 @@
 
   --color-destructive: oklch(0.577 0.245 27.325);
   --color-destructive-foreground: oklch(0.985 0 0);
-  --color-border: oklch(0.269 0 0);
-  --color-input: oklch(0.269 0 0);
+  --color-border: oklch(0.4 0 0);
+  --color-input: oklch(0.4 0 0);
   --color-ring: oklch(0.439 0 0);
 
   --color-sidebar: oklch(0.205 0 0);
@@ -96,4 +99,5 @@
   --color-chart-3: oklch(0.769 0.188 70.08);
   --color-chart-4: oklch(0.627 0.265 303.9);
   --color-chart-5: oklch(0.645 0.246 16.439);
+}
 }

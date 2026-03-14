@@ -48,7 +48,7 @@ export function RegisterForm({ onSubmit, error }: RegisterFormProps) {
       </CardHeader>
       <form onSubmit={handleSubmit}>
         <CardContent className="space-y-4">
-          {error && <p className="text-sm text-red-500">{error}</p>}
+          {error && <p className="text-sm" style={{ color: 'var(--color-destructive)' }}>{error}</p>}
           <div className="space-y-2">
             <Label htmlFor="orgName">{t('orgName')}</Label>
             <Input
@@ -93,9 +93,9 @@ export function RegisterForm({ onSubmit, error }: RegisterFormProps) {
           <Button type="submit" className="w-full" disabled={loading}>
             {loading ? '...' : t('register')}
           </Button>
-          <p className="text-sm text-neutral-500">
+          <p className="text-sm" style={{ color: 'var(--color-muted-foreground)' }}>
             {t('registerPrompt')}{' '}
-            <Link href="/login" className="text-neutral-900 underline dark:text-neutral-100">
+            <Link href="/login" className="underline" style={{ color: 'var(--color-foreground)' }}>
               {t('login')}
             </Link>
           </p>

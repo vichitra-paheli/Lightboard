@@ -46,7 +46,7 @@ export function LoginForm({ onSubmit, error }: LoginFormProps) {
       </CardHeader>
       <form onSubmit={handleSubmit}>
         <CardContent className="space-y-4">
-          {error && <p className="text-sm text-red-500">{error}</p>}
+          {error && <p className="text-sm" style={{ color: 'var(--color-destructive)' }}>{error}</p>}
           <div className="space-y-2">
             <Label htmlFor="email">{t('email')}</Label>
             <Input
@@ -72,9 +72,9 @@ export function LoginForm({ onSubmit, error }: LoginFormProps) {
           <Button type="submit" className="w-full" disabled={loading}>
             {loading ? '...' : t('login')}
           </Button>
-          <p className="text-sm text-neutral-500">
+          <p className="text-sm" style={{ color: 'var(--color-muted-foreground)' }}>
             {t('loginPrompt')}{' '}
-            <Link href="/register" className="text-neutral-900 underline dark:text-neutral-100">
+            <Link href="/register" className="underline" style={{ color: 'var(--color-foreground)' }}>
               {t('register')}
             </Link>
           </p>
