@@ -31,26 +31,34 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Email already in use' }, { status: 409 });
   }
 
-  // Create organization
-  const slug = orgName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  const orgs = await db.insert(organizations).values({ name: orgName, slug }).returning();
-  const org = orgs[0]!;
+  try {
+    // Create organization
+    const slug = orgName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const orgs = await db.insert(organizations).values({ name: orgName, slug }).returning();
+    const org = orgs[0]!;
 
-  // Create admin user
-  const passwordHash = await hashPassword(password);
-  const usersResult = await db
-    .insert(users)
-    .values({ orgId: org.id, email, name, passwordHash, role: 'admin' as const })
-    .returning({ id: users.id, email: users.email, name: users.name, role: users.role });
-  const user = usersResult[0]!;
+    // Create admin user
+    const passwordHash = await hashPassword(password);
+    const usersResult = await db
+      .insert(users)
+      .values({ orgId: org.id, email, name, passwordHash, role: 'admin' as const })
+      .returning({ id: users.id, email: users.email, name: users.name, role: users.role });
+    const user = usersResult[0]!;
 
-  // Create session
-  const { token, expiresAt } = await createSession(db, user.id, org.id);
+    // Create session
+    const { token, expiresAt } = await createSession(db, user.id, org.id);
 
-  const response = NextResponse.json(
-    { user: { id: user.id, email: user.email, name: user.name, role: user.role, orgId: org.id } },
-    { status: 201 },
-  );
-  setSessionCookie(response, token, expiresAt);
-  return response;
+    const response = NextResponse.json(
+      { user: { id: user.id, email: user.email, name: user.name, role: user.role, orgId: org.id } },
+      { status: 201 },
+    );
+    setSessionCookie(response, token, expiresAt);
+    return response;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes('unique') || message.includes('duplicate')) {
+      return NextResponse.json({ error: 'Email already in use' }, { status: 409 });
+    }
+    return NextResponse.json({ error: 'Registration failed' }, { status: 500 });
+  }
 }

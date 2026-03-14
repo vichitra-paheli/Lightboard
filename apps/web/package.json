@@ -9,7 +9,8 @@
     "lint": "next lint && tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@lightboard/db": "workspace:*",
@@ -21,6 +22,7 @@
     "next-intl": "^4.1.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "next-view-transitions": "^0.3.0",
     "tailwind-merge": "^3.3.0"
   },
   "devDependencies": {
@@ -36,6 +38,7 @@
     "prettier-plugin-tailwindcss": "^0.7.2",
     "tailwindcss": "^4.1.6",
     "typescript": "^5.8.2",
+    "@playwright/test": "^1.52.0",
     "vitest": "^3.1.0"
   }
 }
