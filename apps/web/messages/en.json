@@ -1,0 +1,46 @@
+{
+  "common": {
+    "appName": "Lightboard",
+    "loading": "Loading...",
+    "error": "Something went wrong",
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "create": "Create",
+    "search": "Search..."
+  },
+  "nav": {
+    "home": "Home",
+    "explore": "Explore",
+    "dataSources": "Data Sources",
+    "views": "Views",
+    "settings": "Settings"
+  },
+  "home": {
+    "title": "Welcome to Lightboard",
+    "subtitle": "Connect your data, ask questions, get answers."
+  },
+  "explore": {
+    "title": "Explore",
+    "placeholder": "Ask a question about your data...",
+    "newConversation": "New conversation",
+    "send": "Send"
+  },
+  "dataSources": {
+    "title": "Data Sources",
+    "emptyState": "No data sources configured yet.",
+    "addNew": "Add data source",
+    "testConnection": "Test connection",
+    "connected": "Connected",
+    "disconnected": "Disconnected"
+  },
+  "views": {
+    "title": "Views",
+    "emptyState": "No views created yet.",
+    "createFirst": "Open Explore to create your first view."
+  },
+  "settings": {
+    "title": "Settings"
+  }
+}
