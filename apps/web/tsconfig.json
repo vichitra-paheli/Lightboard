@@ -13,8 +13,10 @@
       "@/*": ["./src/*"],
       "@lightboard/db": ["../../packages/db/src"],
       "@lightboard/db/*": ["../../packages/db/src/*"],
+      "@lightboard/query-ir": ["../../packages/query-ir/src"],
       "@lightboard/ui": ["../../packages/ui/src"],
-      "@lightboard/ui/*": ["../../packages/ui/src/*"]
+      "@lightboard/ui/*": ["../../packages/ui/src/*"],
+      "@lightboard/viz-core": ["../../packages/viz-core/src"]
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],

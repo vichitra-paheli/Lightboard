@@ -14,6 +14,7 @@
     "build-storybook": "storybook build"
   },
   "dependencies": {
+    "@lightboard/query-ir": "workspace:*",
     "@visx/axis": "^3.12.0",
     "@visx/grid": "^3.12.0",
     "@visx/group": "^3.3.0",
@@ -23,6 +24,7 @@
     "@visx/tooltip": "^3.3.0",
     "@tanstack/react-table": "^8.21.0",
     "d3-array": "^3.2.4",
+    "zod": "^3.25.0",
     "d3-time-format": "^4.1.0"
   },
   "devDependencies": {
