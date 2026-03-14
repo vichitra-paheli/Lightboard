@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 const UNIQUE = Date.now();
-const TEST_ORG = 'E2E Test Org';
+const TEST_ORG = `E2E Test Org ${UNIQUE}`;
 const TEST_NAME = 'E2E Tester';
 const TEST_EMAIL = `e2e-${UNIQUE}@test.com`;
 const TEST_PASSWORD = 'e2e-password-123';
@@ -154,7 +154,7 @@ test.describe('auth flows', () => {
 
     await page.getByRole('link', { name: 'Explore' }).click();
     await expect(page).toHaveURL(/\/explore/);
-    await expect(page.getByText('Ask a question about your data')).toBeVisible();
+    await expect(page.getByText('Ask a question about your data').first()).toBeVisible();
 
     await page.getByRole('link', { name: 'Data Sources' }).click();
     await expect(page).toHaveURL(/\/data-sources/);

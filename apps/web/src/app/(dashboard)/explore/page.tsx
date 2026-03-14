@@ -1,16 +1,9 @@
-import { useTranslations } from 'next-intl';
+import { ExplorePageClient } from '@/components/explore/explore-page-client';
 
 /**
  * Explore page — chat with AI agent and see live charts.
- * Full implementation in D10.
+ * Server component wrapper for the client-side explore UI.
  */
 export default function ExplorePage() {
-  const t = useTranslations('explore');
-
-  return (
-    <div className="flex flex-col items-center justify-center py-20">
-      <h2 className="text-2xl font-bold tracking-tight">{t('title')}</h2>
-      <p className="mt-2 text-muted-foreground">{t('placeholder')}</p>
-    </div>
-  );
+  return <ExplorePageClient />;
 }
