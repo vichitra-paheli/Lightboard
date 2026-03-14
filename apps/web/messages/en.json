@@ -26,7 +26,10 @@
     "title": "Explore",
     "placeholder": "Ask a question about your data...",
     "newConversation": "New conversation",
-    "send": "Send"
+    "send": "Send",
+    "dataSource": "Data source",
+    "selectDataSource": "Select a data source...",
+    "noResponse": "No response from agent."
   },
   "dataSources": {
     "title": "Data Sources",
