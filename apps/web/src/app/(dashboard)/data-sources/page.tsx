@@ -1,16 +1,9 @@
-import { useTranslations } from 'next-intl';
+import { DataSourcesPageClient } from '@/components/data-sources/data-sources-page-client';
 
 /**
  * Data Sources page — manage database connections.
- * Full implementation in D11.
+ * Server component wrapper for the client-side data source management UI.
  */
 export default function DataSourcesPage() {
-  const t = useTranslations('dataSources');
-
-  return (
-    <div className="flex flex-col items-center justify-center py-20">
-      <h2 className="text-2xl font-bold tracking-tight">{t('title')}</h2>
-      <p className="mt-2 text-muted-foreground">{t('emptyState')}</p>
-    </div>
-  );
+  return <DataSourcesPageClient />;
 }
