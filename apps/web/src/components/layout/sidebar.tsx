@@ -7,11 +7,13 @@ import {
   Compass,
   Database,
   LayoutDashboard,
+  LogOut,
   type LucideIcon,
   Settings,
   SquareKanban,
 } from 'lucide-react';
 
+import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 
 /**
@@ -37,7 +39,14 @@ const NAV_ITEMS: NavItem[] = [
  */
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const t = useTranslations('nav');
+
+  async function handleLogout() {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    router.push('/login');
+    router.refresh();
+  }
 
   return (
     <aside className="flex h-screen w-60 flex-col border-r border-sidebar-border bg-sidebar">
@@ -69,6 +78,16 @@ export function Sidebar() {
           );
         })}
       </nav>
+
+      <div className="border-t border-sidebar-border p-2">
+        <button
+          onClick={handleLogout}
+          className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+        >
+          <LogOut className="h-4 w-4" />
+          {t('logout')}
+        </button>
+      </div>
     </aside>
   );
 }

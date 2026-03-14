@@ -15,7 +15,8 @@
     "explore": "Explore",
     "dataSources": "Data Sources",
     "views": "Views",
-    "settings": "Settings"
+    "settings": "Settings",
+    "logout": "Log out"
   },
   "home": {
     "title": "Welcome to Lightboard",
