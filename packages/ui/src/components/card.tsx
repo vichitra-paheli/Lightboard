@@ -1,0 +1,67 @@
+import * as React from 'react';
+import { cn } from '../utils';
+
+/** A styled card container. */
+export const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  ({ className, style, ...props }, ref) => (
+    <div
+      ref={ref}
+      className={cn('rounded-lg shadow-sm', className)}
+      style={{
+        backgroundColor: 'var(--color-card)',
+        color: 'var(--color-card-foreground)',
+        borderWidth: '1px',
+        borderStyle: 'solid',
+        borderColor: 'var(--color-border)',
+        ...style,
+      }}
+      {...props}
+    />
+  ),
+);
+Card.displayName = 'Card';
+
+/** Card header section. */
+export const CardHeader = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  ({ className, ...props }, ref) => (
+    <div ref={ref} className={cn('flex flex-col space-y-1.5 p-6', className)} {...props} />
+  ),
+);
+CardHeader.displayName = 'CardHeader';
+
+/** Card title element. */
+export const CardTitle = React.forwardRef<HTMLHeadingElement, React.HTMLAttributes<HTMLHeadingElement>>(
+  ({ className, ...props }, ref) => (
+    <h3 ref={ref} className={cn('text-2xl font-semibold leading-none tracking-tight', className)} {...props} />
+  ),
+);
+CardTitle.displayName = 'CardTitle';
+
+/** Card description element. */
+export const CardDescription = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLParagraphElement>>(
+  ({ className, style, ...props }, ref) => (
+    <p
+      ref={ref}
+      className={cn('text-sm', className)}
+      style={{ color: 'var(--color-muted-foreground)', ...style }}
+      {...props}
+    />
+  ),
+);
+CardDescription.displayName = 'CardDescription';
+
+/** Card content section. */
+export const CardContent = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  ({ className, ...props }, ref) => (
+    <div ref={ref} className={cn('p-6 pt-0', className)} {...props} />
+  ),
+);
+CardContent.displayName = 'CardContent';
+
+/** Card footer section. */
+export const CardFooter = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  ({ className, ...props }, ref) => (
+    <div ref={ref} className={cn('flex items-center p-6 pt-0', className)} {...props} />
+  ),
+);
+CardFooter.displayName = 'CardFooter';

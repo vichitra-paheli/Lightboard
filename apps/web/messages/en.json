@@ -15,7 +15,8 @@
     "explore": "Explore",
     "dataSources": "Data Sources",
     "views": "Views",
-    "settings": "Settings"
+    "settings": "Settings",
+    "logout": "Log out"
   },
   "home": {
     "title": "Welcome to Lightboard",
@@ -42,5 +43,19 @@
   },
   "settings": {
     "title": "Settings"
+  },
+  "auth": {
+    "login": "Log in",
+    "loginDescription": "Enter your credentials to continue.",
+    "register": "Create account",
+    "registerDescription": "Set up your organization and admin account.",
+    "email": "Email",
+    "password": "Password",
+    "name": "Full name",
+    "orgName": "Organization name",
+    "loginPrompt": "Don't have an account?",
+    "registerPrompt": "Already have an account?",
+    "invalidCredentials": "Invalid email or password.",
+    "emailInUse": "An account with this email already exists."
   }
 }

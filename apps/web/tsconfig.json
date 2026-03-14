@@ -11,7 +11,10 @@
     "plugins": [{ "name": "next" }],
     "paths": {
       "@/*": ["./src/*"],
-      "@lightboard/ui": ["../../packages/ui/src"]
+      "@lightboard/db": ["../../packages/db/src"],
+      "@lightboard/db/*": ["../../packages/db/src/*"],
+      "@lightboard/ui": ["../../packages/ui/src"],
+      "@lightboard/ui/*": ["../../packages/ui/src/*"]
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
