@@ -21,4 +21,5 @@ export {
   type ToolDefinition,
 } from './provider';
 export { buildSystemPrompt, buildQueryPrompt } from './prompt';
-export { agentTools, queryTools, viewTools, ToolRouter, type ToolContext, type ToolExecutionResult } from './tools';
+export { agentTools, queryTools, viewTools, scratchpadTools, ToolRouter, type ToolContext, type ToolExecutionResult } from './tools';
+export { SessionScratchpad, ScratchpadManager, type ScratchpadTable, type ScratchpadLimits, type ScratchpadManagerOptions } from './scratchpad';
