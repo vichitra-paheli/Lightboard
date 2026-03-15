@@ -3,6 +3,8 @@ export {
   QueryAgent,
   ViewAgent,
   InsightsAgent,
+  LeaderAgent,
+  type LeaderAgentConfig,
   type SubAgent,
   type SubAgentConfig,
   type SubAgentRole,
@@ -22,13 +24,14 @@ export {
   type ToolDefinition,
 } from './provider';
 export { SessionScratchpad, ScratchpadManager, type ScratchpadTable, type ScratchpadLimits, type ScratchpadManagerOptions } from './scratchpad';
-export { buildSystemPrompt, buildQueryPrompt, buildViewPrompt, buildInsightsPrompt } from './prompt';
+export { buildSystemPrompt, buildQueryPrompt, buildViewPrompt, buildInsightsPrompt, buildLeaderPrompt } from './prompt';
 export {
   agentTools,
   queryTools,
   viewTools,
   insightsTools,
   scratchpadTools,
+  leaderTools,
   ToolRouter,
   type ToolContext,
   type ToolExecutionResult,

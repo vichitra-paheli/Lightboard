@@ -1,6 +1,7 @@
 export { QueryAgent } from './query-agent';
 export { ViewAgent } from './view-agent';
 export { InsightsAgent } from './insights-agent';
+export { LeaderAgent, type LeaderAgentConfig } from './leader';
 export type {
   SubAgent,
   SubAgentConfig,
