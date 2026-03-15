@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { withAuth } from '@/lib/auth';
+import { getAdminDb, withAuth } from '@/lib/auth';
 import {
   getDataSourceConnection,
   introspectSchema,
@@ -90,14 +90,18 @@ export const POST = withAuth(async (req, { db, orgId }) => {
   }));
 
   // Build ToolContext with real data source operations
+  // Use adminDb instead of the RLS-scoped pool client because the SSE streaming
+  // path runs asynchronously after withAuth releases the pool client.
+  // getDataSourceConnection already filters by orgId explicitly.
+  const adminDb = getAdminDb();
   const toolContext: ToolContext = {
     getSchema: async (srcId: string) => {
-      const connection = await getDataSourceConnection(db, orgId, srcId);
+      const connection = await getDataSourceConnection(adminDb, orgId, srcId);
       const schema = await introspectSchema(connection);
       return schema as unknown as Record<string, unknown>;
     },
     executeQuery: async (srcId: string, queryIR: Record<string, unknown>) => {
-      const connection = await getDataSourceConnection(db, orgId, srcId);
+      const connection = await getDataSourceConnection(adminDb, orgId, srcId);
       const result = await executeQueryIR(connection, queryIR);
       return result as unknown as Record<string, unknown>;
     },
