@@ -1,10 +1,15 @@
 'use client';
 
+import { MarkdownRenderer } from '@/components/chat/markdown-renderer';
+import { ThinkingState } from '@/components/chat/thinking-state';
+
 /** A message in the chat. */
 export interface ChatMessageData {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  /** Thinking/reasoning text from the agent, shown in a collapsible section. */
+  thinking?: string;
   toolCalls?: { name: string; status: 'running' | 'done' | 'error' }[];
   isStreaming?: boolean;
 }
@@ -30,11 +35,24 @@ export function ChatMessage({ message }: ChatMessageProps) {
           borderColor: 'var(--color-border)',
         }}
       >
-        {message.content && (
+        {!isUser && message.thinking && (
+          <ThinkingState
+            thinking={message.thinking}
+            isActive={message.isStreaming}
+          />
+        )}
+
+        {message.content && isUser && (
           <p className="whitespace-pre-wrap">
             {message.content}
-            {message.isStreaming && <StreamingCursor />}
           </p>
+        )}
+
+        {message.content && !isUser && (
+          <div>
+            <MarkdownRenderer content={message.content} />
+            {message.isStreaming && <StreamingCursor />}
+          </div>
         )}
 
         {!message.content && message.isStreaming && (
