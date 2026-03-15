@@ -1,10 +1,18 @@
 'use client';
 
+import { MarkdownRenderer } from './markdown-renderer';
+import { ThinkingSection } from './thinking-section';
+
 /** A message in the chat. */
 export interface ChatMessageData {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  /** The currently active sub-agent producing this message. */
+  activeAgent?: string;
+  /** The AI's internal reasoning text. */
+  thinking?: string;
+  /** Tool calls triggered during this message. */
   toolCalls?: { name: string; status: 'running' | 'done' | 'error' }[];
   isStreaming?: boolean;
 }
@@ -14,7 +22,7 @@ interface ChatMessageProps {
   message: ChatMessageData;
 }
 
-/** Renders a single chat message with tool call progress indicators and streaming support. */
+/** Renders a single chat message with markdown, thinking section, and tool call indicators. */
 export function ChatMessage({ message }: ChatMessageProps) {
   const isUser = message.role === 'user';
 
@@ -30,14 +38,28 @@ export function ChatMessage({ message }: ChatMessageProps) {
           borderColor: 'var(--color-border)',
         }}
       >
-        {message.content && (
-          <p className="whitespace-pre-wrap">
-            {message.content}
-            {message.isStreaming && <StreamingCursor />}
-          </p>
+        {message.activeAgent && (
+          <div className="mb-1.5 text-xs font-medium" style={{ color: 'var(--color-muted-foreground)' }}>
+            {message.activeAgent}
+          </div>
         )}
 
-        {!message.content && message.isStreaming && (
+        {message.thinking && (
+          <ThinkingSection thinking={message.thinking} isStreaming={message.isStreaming && !message.content} />
+        )}
+
+        {message.content && (
+          <div>
+            {isUser ? (
+              <p className="whitespace-pre-wrap">{message.content}</p>
+            ) : (
+              <MarkdownRenderer content={message.content} />
+            )}
+            {message.isStreaming && <StreamingCursor />}
+          </div>
+        )}
+
+        {!message.content && message.isStreaming && !message.thinking && (
           <p className="whitespace-pre-wrap">
             <StreamingCursor />
           </p>
