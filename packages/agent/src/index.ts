@@ -21,12 +21,14 @@ export {
   type StreamEvent,
   type ToolDefinition,
 } from './provider';
+export { SessionScratchpad, ScratchpadManager, type ScratchpadTable, type ScratchpadLimits, type ScratchpadManagerOptions } from './scratchpad';
 export { buildSystemPrompt, buildQueryPrompt, buildViewPrompt, buildInsightsPrompt } from './prompt';
 export {
   agentTools,
   queryTools,
   viewTools,
   insightsTools,
+  scratchpadTools,
   ToolRouter,
   type ToolContext,
   type ToolExecutionResult,
