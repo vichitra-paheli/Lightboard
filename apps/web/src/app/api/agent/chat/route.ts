@@ -1,14 +1,12 @@
-import { NextResponse, type NextRequest } from 'next/server';
+import { NextResponse } from 'next/server';
+import { withAuth } from '@/lib/auth';
+import { resolveAIProvider } from '@/lib/ai-provider';
 
 /**
  * POST /api/agent/chat — Send a message to the AI agent.
- * Returns the agent's response, tool calls, and any generated ViewSpec.
- *
- * Phase 1 placeholder: returns a mock response explaining that the agent
- * requires a Claude API key to be configured. The full implementation
- * will be wired when the agent package is integrated with real connectors.
+ * Uses the org's configured AI provider, falling back to ANTHROPIC_API_KEY env var.
  */
-export async function POST(req: NextRequest) {
+export const POST = withAuth(async (req, { db, orgId }) => {
   const body = await req.json();
   const { message, sourceId } = body as { message?: string; sourceId?: string };
 
@@ -16,12 +14,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Message is required' }, { status: 400 });
   }
 
-  // Check if Claude API key is configured
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
+  // Resolve AI provider from org settings or env var fallback
+  const provider = await resolveAIProvider(db, orgId);
+  if (!provider) {
     return NextResponse.json({
-      text: 'The AI agent requires an Anthropic API key to be configured. ' +
-        'Set ANTHROPIC_API_KEY in your environment variables to enable the agent. ' +
+      text: 'No AI model configured. Go to Settings to set up your AI provider, ' +
+        'or set the ANTHROPIC_API_KEY environment variable.' +
         `\n\nYour message was: "${message}"` +
         (sourceId ? `\nSelected data source: ${sourceId}` : ''),
       toolCalls: [],
@@ -29,10 +27,12 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // TODO: Wire up the real agent with ClaudeProvider when connectors are integrated
+  // TODO: Wire up the real Agent class with the resolved provider
+  // For now, acknowledge that a provider is configured
   return NextResponse.json({
-    text: `Agent processing is not yet fully wired. Your question: "${message}"`,
+    text: `AI provider "${provider.name}" is configured. Full agent wiring coming soon.` +
+      `\n\nYour question: "${message}"`,
     toolCalls: [],
     viewSpec: null,
   });
-}
+});

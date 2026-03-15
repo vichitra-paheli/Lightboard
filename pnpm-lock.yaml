@@ -20,6 +20,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@lightboard/agent':
+        specifier: workspace:*
+        version: link:../../packages/agent
       '@lightboard/db':
         specifier: workspace:*
         version: link:../../packages/db
