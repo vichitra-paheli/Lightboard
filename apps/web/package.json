@@ -13,6 +13,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@lightboard/agent": "workspace:*",
     "@lightboard/db": "workspace:*",
     "@lightboard/query-ir": "workspace:*",
     "@lightboard/ui": "workspace:*",

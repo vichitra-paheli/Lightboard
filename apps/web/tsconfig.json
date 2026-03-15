@@ -11,6 +11,7 @@
     "plugins": [{ "name": "next" }],
     "paths": {
       "@/*": ["./src/*"],
+      "@lightboard/agent": ["../../packages/agent/src"],
       "@lightboard/db": ["../../packages/db/src"],
       "@lightboard/db/*": ["../../packages/db/src/*"],
       "@lightboard/query-ir": ["../../packages/query-ir/src"],
