@@ -239,6 +239,7 @@ export function ExplorePageClient() {
                   m.id === assistantMsgId ? { ...m, isStreaming: false } : m,
                 ),
               );
+              setIsStreaming(false);
               if (data.conversationId) {
                 setConversationId(data.conversationId);
               }
@@ -409,17 +410,25 @@ export function ExplorePageClient() {
     [selectedSource, conversationId, t, consumeSSEStream],
   );
 
-  const handleNewConversation = useCallback(() => {
-    // Abort any in-progress stream
+  /** Stop the current agent stream. */
+  const handleStop = useCallback(() => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
+      abortControllerRef.current = null;
     }
+    setIsStreaming(false);
+    setMessages((prev) =>
+      prev.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m)),
+    );
+  }, []);
+
+  const handleNewConversation = useCallback(() => {
+    handleStop();
     setMessages([]);
     setCurrentView(null);
     setViewData(null);
     setConversationId(null);
-    setIsStreaming(false);
-  }, []);
+  }, [handleStop]);
 
   return (
     <ChartThemeProvider mode="dark">
@@ -441,6 +450,7 @@ export function ExplorePageClient() {
             <ChatPanel
               messages={messages}
               onSend={handleSend}
+              onStop={handleStop}
               onNewConversation={handleNewConversation}
               isStreaming={isStreaming}
             />

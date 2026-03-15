@@ -230,29 +230,26 @@ describe('LeaderAgent', () => {
     expect(agentStarts[0]!.agent).toBe('insights');
   });
 
-  it('handles scratchpad save and load', async () => {
+  it('load_scratchpad returns summary not raw data', async () => {
     const scratchpadManager = new ScratchpadManager({ cleanupIntervalMs: 0 });
+    // Pre-populate scratchpad
+    const pad = scratchpadManager.getOrCreate('test-conv');
+    await pad.saveTable('my_data', [{ a: 1 }, { a: 2 }, { a: 3 }], 'Test data');
 
     const leader = new LeaderAgent({
       provider: mockProvider([
-        // Leader saves to scratchpad
         [
-          { type: 'tool_call_start', id: 'tc_1', name: 'save_scratchpad' },
+          { type: 'tool_call_start', id: 'tc_1', name: 'load_scratchpad' },
           {
             type: 'tool_call_end',
             id: 'tc_1',
-            name: 'save_scratchpad',
-            input: {
-              table_name: 'my_data',
-              rows: [{ a: 1 }, { a: 2 }],
-              description: 'Test data',
-            },
+            name: 'load_scratchpad',
+            input: { table_name: 'my_data' },
           },
           { type: 'message_end', stopReason: 'tool_use' },
         ],
-        // Leader confirms save
         [
-          { type: 'text_delta', text: 'Saved.' },
+          { type: 'text_delta', text: 'Found 3 rows.' },
           { type: 'message_end', stopReason: 'end_turn' },
         ],
       ]),
@@ -261,15 +258,16 @@ describe('LeaderAgent', () => {
       scratchpadManager,
     });
 
-    const events = await collectEvents(leader, 'Save this data');
+    const events = await collectEvents(leader, 'Show me my_data');
 
     const toolEnd = events.find((e) => e.type === 'tool_end') as Extract<AgentEvent, { type: 'tool_end' }>;
     expect(toolEnd).toBeDefined();
     expect(toolEnd.isError).toBe(false);
 
-    // Verify data was actually saved
-    const scratchpad = scratchpadManager.getOrCreate('test-conv');
-    expect(scratchpad.hasTable('my_data')).toBe(true);
+    const result = JSON.parse(toolEnd.result);
+    expect(result.rowCount).toBe(3);
+    expect(result.sampleRows).toBeDefined();
+    expect(result.columns).toBeDefined();
 
     await scratchpadManager.destroyAll();
   });
@@ -348,12 +346,12 @@ describe('LeaderAgent', () => {
     expect(history.length).toBe(4); // 2 user + 2 assistant
   });
 
-  it('multi-step: query → save scratchpad → load scratchpad', async () => {
+  it('auto-saves query results to scratchpad and returns summary', async () => {
     const scratchpadManager = new ScratchpadManager({ cleanupIntervalMs: 0 });
 
     const leader = new LeaderAgent({
       provider: mockProvider([
-        // Turn 1: Leader delegates query
+        // Leader delegates query
         [
           { type: 'tool_call_start', id: 'tc_1', name: 'delegate_query' },
           {
@@ -380,35 +378,9 @@ describe('LeaderAgent', () => {
           { type: 'text_delta', text: 'Got data.' },
           { type: 'message_end', stopReason: 'end_turn' },
         ],
-        // Leader saves to scratchpad
+        // Leader summarizes (no save_scratchpad call — auto-saved server-side)
         [
-          { type: 'tool_call_start', id: 'tc_2', name: 'save_scratchpad' },
-          {
-            type: 'tool_call_end',
-            id: 'tc_2',
-            name: 'save_scratchpad',
-            input: {
-              table_name: 'sales_data',
-              rows: [{ region: 'North', total: 5000 }, { region: 'South', total: 3200 }],
-              description: 'Sales by region',
-            },
-          },
-          { type: 'message_end', stopReason: 'tool_use' },
-        ],
-        // Leader loads from scratchpad to verify
-        [
-          { type: 'tool_call_start', id: 'tc_3', name: 'load_scratchpad' },
-          {
-            type: 'tool_call_end',
-            id: 'tc_3',
-            name: 'load_scratchpad',
-            input: { table_name: 'sales_data' },
-          },
-          { type: 'message_end', stopReason: 'tool_use' },
-        ],
-        // Leader summarizes
-        [
-          { type: 'text_delta', text: 'Saved and verified.' },
+          { type: 'text_delta', text: 'Found the data.' },
           { type: 'message_end', stopReason: 'end_turn' },
         ],
       ]),
@@ -417,24 +389,25 @@ describe('LeaderAgent', () => {
       scratchpadManager,
     });
 
-    const events = await collectEvents(leader, 'Get sales data and save it');
+    const events = await collectEvents(leader, 'Get sales data');
 
-    // Should have query delegation + scratchpad ops
+    // Verify delegation happened
     expect(events.some((e) => e.type === 'agent_start')).toBe(true);
     expect(events.some((e) => e.type === 'done')).toBe(true);
 
-    // Verify scratchpad has the data
+    // Verify data was auto-saved to scratchpad
     const scratchpad = scratchpadManager.getOrCreate('test-conv');
-    expect(scratchpad.hasTable('sales_data')).toBe(true);
-    const tables = scratchpad.listTables();
-    expect(tables[0]!.description).toBe('Sales by region');
+    expect(scratchpad.listTables().length).toBeGreaterThan(0);
 
-    // Verify load returned data
-    const loadEvents = events.filter((e) => e.type === 'tool_end' && e.name === 'load_scratchpad') as Array<Extract<AgentEvent, { type: 'tool_end' }>>;
-    expect(loadEvents).toHaveLength(1);
-    expect(loadEvents[0]!.isError).toBe(false);
-    const loadedData = JSON.parse(loadEvents[0]!.result);
-    expect(loadedData.rows).toHaveLength(2);
+    // Verify the delegate_query tool result contains a summary, not raw data
+    const queryEnd = events.find((e) => e.type === 'tool_end' && e.name === 'delegate_query') as Extract<AgentEvent, { type: 'tool_end' }>;
+    expect(queryEnd).toBeDefined();
+    const result = JSON.parse(queryEnd.result);
+    expect(result.scratchpadTable).toBeDefined();
+    expect(result.rowCount).toBeDefined();
+    expect(result.sampleRows).toBeDefined();
+    // Should NOT contain the full rows array
+    expect(result.rows).toBeUndefined();
 
     await scratchpadManager.destroyAll();
   });

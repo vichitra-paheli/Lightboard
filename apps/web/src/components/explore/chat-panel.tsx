@@ -9,12 +9,13 @@ import { ChatMessage, type ChatMessageData } from './chat-message';
 interface ChatPanelProps {
   messages: ChatMessageData[];
   onSend: (message: string) => void;
+  onStop: () => void;
   onNewConversation: () => void;
   isStreaming: boolean;
 }
 
 /** Chat panel with message history, input, and new conversation button. */
-export function ChatPanel({ messages, onSend, onNewConversation, isStreaming }: ChatPanelProps) {
+export function ChatPanel({ messages, onSend, onStop, onNewConversation, isStreaming }: ChatPanelProps) {
   const t = useTranslations('explore');
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -64,7 +65,7 @@ export function ChatPanel({ messages, onSend, onNewConversation, isStreaming }: 
       </div>
 
       {/* Input */}
-      <ChatInput onSend={onSend} disabled={isStreaming} />
+      <ChatInput onSend={onSend} onStop={onStop} isStreaming={isStreaming} />
     </div>
   );
 }

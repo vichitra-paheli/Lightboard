@@ -12,6 +12,7 @@ import { redis } from '@/lib/redis';
 import { dataSources } from '@lightboard/db/schema';
 import { eq } from 'drizzle-orm';
 import {
+  Agent,
   LeaderAgent,
   ScratchpadManager,
   LLMError,
@@ -30,6 +31,30 @@ const scratchpadManager = new ScratchpadManager({
   cleanupIntervalMs: 5 * 60 * 1000,
   maxSessionAgeMs: 60 * 60 * 1000,
 });
+
+/**
+ * Cache of LeaderAgent instances by session ID.
+ * Leaders persist across turns to maintain conversation state in-memory,
+ * avoiding Redis round-trips and keeping the ConversationManager warm.
+ * Entries expire after 1 hour of inactivity.
+ */
+const leaderCache = new Map<string, { leader: LeaderAgent; lastAccess: number }>();
+
+/** Max age for cached leaders before eviction (1 hour). */
+const LEADER_CACHE_MAX_AGE_MS = 60 * 60 * 1000;
+
+/** Periodically evict stale leaders. */
+const leaderCleanupInterval = setInterval(() => {
+  const now = Date.now();
+  for (const [id, entry] of leaderCache) {
+    if (now - entry.lastAccess > LEADER_CACHE_MAX_AGE_MS) {
+      leaderCache.delete(id);
+    }
+  }
+}, 5 * 60 * 1000);
+if (typeof leaderCleanupInterval === 'object' && 'unref' in leaderCleanupInterval) {
+  (leaderCleanupInterval as NodeJS.Timeout).unref();
+}
 
 /** Maximum duration for agent processing in milliseconds. */
 const AGENT_TIMEOUT_MS = 300_000;
@@ -140,20 +165,30 @@ export const POST = withAuth(async (req, { db, orgId }) => {
   // Generate or reuse conversation/session ID
   const sessionId = conversationId ?? `conv_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
 
-  // Instantiate the multi-agent LeaderAgent (delegates to query/view/insights specialists)
-  const leader = new LeaderAgent({
-    provider,
-    toolContext,
-    dataSources: agentDataSources,
-    scratchpadManager,
-  });
+  // Reuse existing LeaderAgent for this session, or create a new one.
+  // Leaders persist across turns to keep conversation state in-memory.
+  let leader: LeaderAgent;
+  const cached = leaderCache.get(sessionId);
+  if (cached) {
+    leader = cached.leader;
+    cached.lastAccess = Date.now();
+  } else {
+    leader = new LeaderAgent({
+      provider,
+      toolContext,
+      dataSources: agentDataSources,
+      scratchpadManager,
+    });
 
-  // Load conversation history from Redis if conversationId provided
-  if (conversationId) {
-    const stored = await loadConversation(orgId, conversationId);
-    if (stored) {
-      leader.loadHistory(stored);
+    // Load conversation history from Redis for cold-start recovery
+    if (conversationId) {
+      const stored = await loadConversation(orgId, conversationId);
+      if (stored) {
+        leader.loadHistory(stored);
+      }
     }
+
+    leaderCache.set(sessionId, { leader, lastAccess: Date.now() });
   }
 
   // Check if client wants SSE streaming
@@ -322,14 +357,21 @@ function handleStreaming(
                   isError: event.isError,
                 });
 
-                // Emit view_created for create_view / modify_view tool results
-                if ((event.name === 'create_view' || event.name === 'modify_view') && !event.isError) {
+                // Emit view_created for view-related tool results
+                if (!event.isError) {
                   try {
                     const parsed = JSON.parse(event.result);
-                    if (parsed.viewSpec) {
+                    // Direct create_view/modify_view (single-agent path)
+                    if ((event.name === 'create_view' || event.name === 'modify_view') && parsed.viewSpec) {
                       enqueue('view_created', { viewSpec: parsed.viewSpec });
                     }
-                  } catch { /* ignore */ }
+                    // delegate_view (multi-agent path) — ViewSpec is in the sub-agent result
+                    if (event.name === 'delegate_view' && parsed.viewSpec) {
+                      enqueue('view_created', { viewSpec: parsed.viewSpec });
+                    } else if (event.name === 'delegate_view' && parsed.viewId) {
+                      enqueue('view_created', { viewSpec: parsed });
+                    }
+                  } catch { /* ignore parse errors */ }
                 }
                 break;
               }

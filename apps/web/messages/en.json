@@ -30,6 +30,7 @@
     "placeholder": "Ask a question about your data...",
     "newConversation": "New conversation",
     "send": "Send",
+    "stop": "Stop",
     "dataSource": "Data source",
     "selectDataSource": "Select a data source...",
     "noResponse": "No response from agent."

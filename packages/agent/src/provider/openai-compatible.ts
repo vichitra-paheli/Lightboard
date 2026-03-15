@@ -63,8 +63,10 @@ export class OpenAICompatibleProvider implements LLMProvider {
       body.temperature = options.temperature;
     }
 
-    console.log(`[OpenAICompatibleProvider] Request: model=${body.model}, messages=${(body.messages as unknown[]).length}, tools=${openaiTools?.length ?? 0}`);
-    console.log(`[OpenAICompatibleProvider] Messages:`, JSON.stringify(body.messages, null, 2).slice(0, 500));
+    const msgSummary = (body.messages as Array<{ role: string; content?: unknown }>).map(
+      (m) => `${m.role}:${typeof m.content === 'string' ? m.content.slice(0, 80) : String(m.content)}`,
+    );
+    console.log(`[OpenAICompatibleProvider] Request: model=${body.model}, msgs=[${msgSummary.join(' | ')}], tools=${openaiTools?.length ?? 0}`);
 
     const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
       method: 'POST',
@@ -98,8 +100,21 @@ export class OpenAICompatibleProvider implements LLMProvider {
     const decoder = new TextDecoder();
     let buffer = '';
 
-    // Track tool call state to emit tool_call_end with parsed arguments
-    const toolCallArgs = new Map<string, { name: string; args: string }>();
+    // Track tool calls by index (id only appears in the first chunk, subsequent
+    // delta chunks only have index). Map index → { id, name, args }.
+    const toolCallsByIndex = new Map<number, { id: string; name: string; args: string }>();
+
+    /** Emit tool_call_end for all pending tool calls and clear the map. */
+    const flushToolCalls = function* () {
+      for (const [, tc] of toolCallsByIndex) {
+        let parsedInput: Record<string, unknown> = {};
+        try {
+          parsedInput = JSON.parse(tc.args);
+        } catch { /* leave as empty */ }
+        yield { type: 'tool_call_end' as const, id: tc.id, name: tc.name, input: parsedInput };
+      }
+      toolCallsByIndex.clear();
+    };
 
     while (true) {
       const { done, value } = await reader.read();
@@ -113,16 +128,8 @@ export class OpenAICompatibleProvider implements LLMProvider {
         if (!line.startsWith('data: ')) continue;
         const data = line.slice(6).trim();
         if (data === '[DONE]') {
-          // Emit tool_call_end for any pending tool calls before closing
-          for (const [id, tc] of toolCallArgs) {
-            try {
-              const parsed = JSON.parse(tc.args);
-              yield { type: 'tool_call_end' as const, id, name: tc.name, input: parsed };
-            } catch {
-              yield { type: 'tool_call_end' as const, id, name: tc.name, input: {} };
-            }
-          }
-          yield { type: 'message_end', stopReason: 'end_turn' };
+          yield* flushToolCalls();
+          yield { type: 'message_end', stopReason: toolCallsByIndex.size > 0 ? 'tool_use' : 'end_turn' };
           return;
         }
 
@@ -138,47 +145,30 @@ export class OpenAICompatibleProvider implements LLMProvider {
 
           if (delta?.tool_calls) {
             for (const tc of delta.tool_calls) {
-              const callId = tc.id ?? `call_${tc.index}`;
-              if (tc.function?.name) {
-                toolCallArgs.set(callId, { name: tc.function.name, args: '' });
-                yield {
-                  type: 'tool_call_start',
-                  id: callId,
-                  name: tc.function.name,
-                };
-              }
-              if (tc.function?.arguments) {
-                const existing = toolCallArgs.get(callId);
-                if (existing) {
-                  existing.args += tc.function.arguments;
-                }
-                yield {
-                  type: 'tool_call_delta',
-                  id: callId,
-                  input: tc.function.arguments,
-                };
+              const index = tc.index ?? 0;
+              const existing = toolCallsByIndex.get(index);
+
+              if (tc.id && tc.function?.name) {
+                // First chunk for this tool call — has id and name
+                toolCallsByIndex.set(index, { id: tc.id, name: tc.function.name, args: tc.function.arguments ?? '' });
+                yield { type: 'tool_call_start', id: tc.id, name: tc.function.name };
+              } else if (tc.function?.arguments && existing) {
+                // Subsequent delta chunks — only have index and argument fragment
+                existing.args += tc.function.arguments;
+                yield { type: 'tool_call_delta', id: existing.id, input: tc.function.arguments };
               }
             }
           }
 
-          // When finish_reason indicates tool calls are complete, emit tool_call_end events
-          if (finishReason === 'tool_calls' || finishReason === 'stop') {
-            for (const [id, tc] of toolCallArgs) {
-              try {
-                const parsedArgs = JSON.parse(tc.args);
-                yield { type: 'tool_call_end' as const, id, name: tc.name, input: parsedArgs };
-              } catch {
-                yield { type: 'tool_call_end' as const, id, name: tc.name, input: {} };
-              }
-            }
-            if (finishReason === 'tool_calls') {
-              yield { type: 'message_end', stopReason: 'tool_use' };
-              return;
-            }
-            if (finishReason === 'stop') {
-              yield { type: 'message_end', stopReason: 'end_turn' };
-              return;
-            }
+          if (finishReason === 'tool_calls') {
+            yield* flushToolCalls();
+            yield { type: 'message_end', stopReason: 'tool_use' };
+            return;
+          }
+          if (finishReason === 'stop') {
+            yield* flushToolCalls();
+            yield { type: 'message_end', stopReason: 'end_turn' };
+            return;
           }
         } catch {
           // Skip malformed SSE lines
@@ -186,15 +176,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
       }
     }
 
-    // Emit any remaining tool calls if stream ended without finish_reason
-    for (const [id, tc] of toolCallArgs) {
-      try {
-        const parsed = JSON.parse(tc.args);
-        yield { type: 'tool_call_end' as const, id, name: tc.name, input: parsed };
-      } catch {
-        yield { type: 'tool_call_end' as const, id, name: tc.name, input: {} };
-      }
-    }
+    yield* flushToolCalls();
     yield { type: 'message_end', stopReason: 'end_turn' };
   }
 

@@ -30,12 +30,33 @@ export interface LeaderAgentConfig {
   subAgentMaxRounds?: number;
 }
 
+/** Maximum number of sample rows to include in summaries sent to the LLM. */
+const MAX_SAMPLE_ROWS = 5;
+
+/**
+ * Builds a compact data summary from query results.
+ * The LLM receives this instead of raw data — keeps context small.
+ */
+function buildDataSummary(data: Record<string, unknown>): Record<string, unknown> {
+  const rows = (data.rows ?? data.result ?? []) as Record<string, unknown>[];
+  const rowCount = rows.length;
+  const sampleRows = rows.slice(0, MAX_SAMPLE_ROWS);
+  const columns = rowCount > 0
+    ? Object.entries(sampleRows[0]!).map(([name, value]) => ({
+        name,
+        type: typeof value,
+      }))
+    : [];
+
+  return { columns, rowCount, sampleRows };
+}
+
 /**
  * Leader Agent — the multi-agent conversation orchestrator.
  *
  * Manages conversation with the user, delegates to specialist sub-agents
- * (query, view, insights) via tool use, and manages the session scratchpad.
- * Only the leader streams text to the user.
+ * (query, view, insights) via tool use. Data stays server-side — the LLM
+ * only sees compact summaries. Query results are auto-saved to the scratchpad.
  */
 export class LeaderAgent {
   private provider: LLMProvider;
@@ -45,6 +66,8 @@ export class LeaderAgent {
   private conversation: ConversationManager;
   private maxToolRounds: number;
   private subAgentMaxRounds: number;
+  /** Counter for auto-naming scratchpad tables. */
+  private queryCounter = 0;
 
   constructor(config: LeaderAgentConfig) {
     this.provider = config.provider;
@@ -68,7 +91,9 @@ export class LeaderAgent {
     this.conversation.addMessage({ role: 'user', content: userMessage });
 
     const scratchpad = this.scratchpadManager.getOrCreate(conversationId);
-    const scratchpadTables = scratchpad.listTables().map((t) => `${t.name}: ${t.description}`);
+    const scratchpadTables = scratchpad.listTables().map((t) =>
+      `${t.name} (${t.rowCount} rows): ${t.description}`,
+    );
 
     const systemPrompt = buildLeaderPrompt({
       dataSources: this.dataSources,
@@ -142,8 +167,11 @@ export class LeaderAgent {
 
         if (tc.name.startsWith('delegate_')) {
           result = yield* this.handleDelegation(tc, conversationId);
-        } else if (tc.name.startsWith('save_') || tc.name.startsWith('load_') || tc.name.startsWith('list_') || tc.name.startsWith('query_')) {
-          result = await this.handleScratchpad(tc, conversationId);
+        } else if (tc.name === 'list_scratchpads') {
+          const tables = scratchpad.listTables();
+          result = { content: JSON.stringify(tables), isError: false };
+        } else if (tc.name === 'load_scratchpad') {
+          result = await this.handleLoadScratchpad(tc, conversationId);
         } else {
           result = { content: `Unknown tool: ${tc.name}`, isError: true };
         }
@@ -168,21 +196,23 @@ export class LeaderAgent {
 
   /**
    * Handle a delegation tool call by creating and running the appropriate sub-agent.
-   * Yields agent_start/agent_end events for UI transparency.
+   * Query results are auto-saved to the scratchpad — the LLM only gets a summary.
    */
   private async *handleDelegation(
     tc: ToolCallResult,
     conversationId: string,
   ): AsyncGenerator<AgentEvent, { content: string; isError: boolean }> {
-    const input = tc.input as { instruction?: string; source_id?: string; data_summary?: Record<string, unknown>; table_name?: string };
-    const instruction = input.instruction ?? '';
+    const input = tc.input as Record<string, unknown>;
+    const instruction = (input.instruction as string)
+      || this.getLastUserMessage()
+      || 'Explore the available data';
 
     try {
       switch (tc.name) {
         case 'delegate_query': {
           yield { type: 'agent_start', agent: 'query', task: instruction };
 
-          const sourceId = input.source_id ?? this.dataSources[0]?.id ?? '';
+          const sourceId = (input.source_id as string) ?? this.dataSources[0]?.id ?? '';
           const ds = this.dataSources.find((d) => d.id === sourceId);
 
           const queryRouter = new ToolRouter(this.toolContext, queryTools);
@@ -195,20 +225,42 @@ export class LeaderAgent {
           const task: AgentTask = {
             id: `task_${Date.now()}`,
             instruction,
-            context: {
-              dataSources: ds ? [ds] : this.dataSources,
-            },
+            context: { dataSources: ds ? [ds] : this.dataSources },
           };
 
           const agentResult = await agent.run(task);
+
+          // Auto-save query results to scratchpad (server-side, no LLM round-trip)
+          let tableName: string | undefined;
+          if (agentResult.success && agentResult.data) {
+            const rows = (agentResult.data.rows ?? []) as Record<string, unknown>[];
+            if (rows.length > 0) {
+              this.queryCounter++;
+              tableName = `query_${this.queryCounter}`;
+              try {
+                const scratchpad = this.scratchpadManager.getOrCreate(conversationId);
+                await scratchpad.saveTable(tableName, rows, instruction.slice(0, 100));
+              } catch { /* scratchpad save is best-effort */ }
+            }
+          }
+
           const summary = agentResult.success
             ? agentResult.explanation || 'Query completed'
             : `Query failed: ${agentResult.error ?? 'unknown error'}`;
 
           yield { type: 'agent_end', agent: 'query', summary };
 
+          // Return compact summary to the LLM — NOT raw data
+          const dataSummary = agentResult.success
+            ? buildDataSummary(agentResult.data)
+            : { error: agentResult.error };
+
           return {
-            content: JSON.stringify(agentResult.data),
+            content: JSON.stringify({
+              ...dataSummary,
+              ...(tableName ? { scratchpadTable: tableName } : {}),
+              explanation: agentResult.explanation,
+            }),
             isError: !agentResult.success,
           };
         }
@@ -223,20 +275,28 @@ export class LeaderAgent {
             maxToolRounds: this.subAgentMaxRounds,
           });
 
+          // Build data summary from scratchpad table if referenced
+          let dataSummary = input.data_summary as Record<string, unknown> | undefined;
+          if (!dataSummary && input.scratchpad_table) {
+            try {
+              const scratchpad = this.scratchpadManager.getOrCreate(conversationId);
+              const rows = await scratchpad.loadTable(input.scratchpad_table as string);
+              dataSummary = buildDataSummary({ rows });
+            } catch { /* fallback to empty summary */ }
+          }
+
           const task: AgentTask = {
             id: `task_${Date.now()}`,
             instruction,
-            context: {
-              dataSummary: input.data_summary ?? {},
-            },
+            context: { dataSummary: dataSummary ?? {} },
           };
 
           const agentResult = await agent.run(task);
-          const summary = agentResult.success
+          const agentSummary = agentResult.success
             ? agentResult.explanation || 'View created'
             : `View creation failed: ${agentResult.error ?? 'unknown error'}`;
 
-          yield { type: 'agent_end', agent: 'view', summary };
+          yield { type: 'agent_end', agent: 'view', summary: agentSummary };
 
           return {
             content: JSON.stringify(agentResult.data),
@@ -257,17 +317,15 @@ export class LeaderAgent {
           const task: AgentTask = {
             id: `task_${Date.now()}`,
             instruction,
-            context: {
-              tableName: input.table_name,
-            },
+            context: { tableName: input.table_name },
           };
 
           const agentResult = await agent.run(task);
-          const summary = agentResult.success
+          const agentSummary = agentResult.success
             ? agentResult.explanation || 'Analysis completed'
             : `Analysis failed: ${agentResult.error ?? 'unknown error'}`;
 
-          yield { type: 'agent_end', agent: 'insights', summary };
+          yield { type: 'agent_end', agent: 'insights', summary: agentSummary };
 
           return {
             content: JSON.stringify(agentResult.data),
@@ -285,46 +343,40 @@ export class LeaderAgent {
     }
   }
 
-  /** Handle scratchpad tool calls (save, load, list, query). */
-  private async handleScratchpad(
+  /** Handle load_scratchpad — returns summary, not full data. */
+  private async handleLoadScratchpad(
     tc: ToolCallResult,
     conversationId: string,
   ): Promise<{ content: string; isError: boolean }> {
-    const scratchpad = this.scratchpadManager.getOrCreate(conversationId);
     const input = tc.input as Record<string, unknown>;
+    const tableName = input.table_name as string;
+
+    if (!tableName) {
+      return { content: 'table_name is required', isError: true };
+    }
 
     try {
-      switch (tc.name) {
-        case 'save_scratchpad': {
-          const tableName = input.table_name as string;
-          const rows = input.rows as Record<string, unknown>[];
-          const description = input.description as string | undefined;
-          const meta = await scratchpad.saveTable(tableName, rows, description);
-          return { content: JSON.stringify(meta), isError: false };
-        }
-        case 'load_scratchpad': {
-          const tableName = input.table_name as string;
-          const rows = await scratchpad.loadTable(tableName);
-          return { content: JSON.stringify({ rows, rowCount: rows.length }), isError: false };
-        }
-        case 'list_scratchpads': {
-          const tables = scratchpad.listTables();
-          return { content: JSON.stringify(tables), isError: false };
-        }
-        case 'query_scratchpad': {
-          const sql = input.sql as string;
-          const result = await scratchpad.query(sql);
-          return { content: JSON.stringify(result), isError: false };
-        }
-        default:
-          return { content: `Unknown scratchpad tool: ${tc.name}`, isError: true };
-      }
+      const scratchpad = this.scratchpadManager.getOrCreate(conversationId);
+      const rows = await scratchpad.loadTable(tableName);
+      const summary = buildDataSummary({ rows });
+      return { content: JSON.stringify(summary), isError: false };
     } catch (err) {
       return {
         content: `Scratchpad error: ${err instanceof Error ? err.message : String(err)}`,
         isError: true,
       };
     }
+  }
+
+  /** Get the last user message from conversation history. */
+  private getLastUserMessage(): string | undefined {
+    const messages = this.conversation.getMessages();
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i]!.role === 'user' && messages[i]!.content) {
+        return messages[i]!.content;
+      }
+    }
+    return undefined;
   }
 
   /** Load prior conversation history. */
@@ -337,6 +389,7 @@ export class LeaderAgent {
   /** Reset the conversation history. */
   reset(): void {
     this.conversation.clear();
+    this.queryCounter = 0;
   }
 
   /** Get the conversation history. */

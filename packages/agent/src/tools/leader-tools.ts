@@ -1,17 +1,19 @@
 import type { ToolDefinition } from '../provider/types';
-import { scratchpadTools } from './scratchpad-tools';
 
 /**
- * Delegation tool definitions for the Leader Agent.
- * These tools allow the leader to route tasks to specialist sub-agents.
+ * Tool definitions available to the Leader Agent.
+ * Delegation tools for sub-agents + lightweight scratchpad inspection.
+ *
+ * Data stays server-side: delegate_query auto-saves results to the scratchpad.
+ * The LLM only sees compact summaries (columns, row count, sample rows).
  */
-const delegationTools: ToolDefinition[] = [
+export const leaderTools: ToolDefinition[] = [
   {
     name: 'delegate_query',
     description:
       'Delegate a data retrieval task to the Query specialist. ' +
-      'The query agent can explore schemas, execute QueryIR queries, and run raw SQL. ' +
-      'Provide a clear instruction about what data to retrieve.',
+      'Results are automatically saved to the scratchpad — you will receive a compact summary ' +
+      '(columns, row count, sample rows) and the scratchpad table name for reference.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -31,28 +33,27 @@ const delegationTools: ToolDefinition[] = [
     name: 'delegate_view',
     description:
       'Delegate visualization creation to the View specialist. ' +
-      'The view agent selects the best chart type and generates a ViewSpec. ' +
-      'Provide the data summary (columns, types, sample rows) and instruction.',
+      'Provide the scratchpad table name from a previous query and the desired visualization. ' +
+      'The view agent receives the data summary automatically.',
     inputSchema: {
       type: 'object',
       properties: {
         instruction: {
           type: 'string',
-          description: 'What visualization to create (e.g., "Create a bar chart of sales by region")',
+          description: 'What visualization to create (e.g., "Create a bar chart of sales by region with a team filter")',
         },
-        data_summary: {
-          type: 'object',
-          description: 'Summary of the data: columns, types, row count, sample rows',
+        scratchpad_table: {
+          type: 'string',
+          description: 'Name of the scratchpad table containing the data (from a previous delegate_query result)',
         },
       },
-      required: ['instruction', 'data_summary'],
+      required: ['instruction'],
     },
   },
   {
     name: 'delegate_insights',
     description:
       'Delegate statistical analysis to the Insights specialist. ' +
-      'The insights agent computes statistics, finds patterns, and identifies outliers. ' +
       'Provide a question and optionally the scratchpad table name to analyze.',
     inputSchema: {
       type: 'object',
@@ -69,13 +70,30 @@ const delegationTools: ToolDefinition[] = [
       required: ['instruction'],
     },
   },
-];
-
-/**
- * All tools available to the Leader Agent:
- * delegation tools + scratchpad tools.
- */
-export const leaderTools: ToolDefinition[] = [
-  ...delegationTools,
-  ...scratchpadTools,
+  {
+    name: 'list_scratchpads',
+    description:
+      'List all tables saved in the session scratchpad with metadata ' +
+      '(name, description, row count). Use this to see what data is available.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'load_scratchpad',
+    description:
+      'Load a summary of a scratchpad table (columns, row count, sample rows). ' +
+      'Use this to inspect data from a previous query before visualizing or analyzing.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        table_name: {
+          type: 'string',
+          description: 'Name of the scratchpad table to inspect',
+        },
+      },
+      required: ['table_name'],
+    },
+  },
 ];
