@@ -8,9 +8,6 @@ import { ChatPanel } from './chat-panel';
 import type { ChatMessageData } from './chat-message';
 import { DataSourceSelector, type DataSourceOption } from './data-source-selector';
 
-/** Mock data sources for Phase 1 (will be fetched from API later). */
-const MOCK_SOURCES: DataSourceOption[] = [];
-
 /**
  * Client-side Explore page component.
  * Split panel: chat on the left, view renderer on the right.
@@ -22,6 +19,29 @@ export function ExplorePageClient() {
   const [selectedSource, setSelectedSource] = useState<string | null>(null);
   const [currentView, setCurrentView] = useState<ViewSpec | null>(null);
   const [viewData, setViewData] = useState<Record<string, unknown>[] | null>(null);
+  const [dataSources, setDataSources] = useState<DataSourceOption[]>([]);
+
+  // Fetch data sources from API on mount
+  useEffect(() => {
+    async function loadSources() {
+      try {
+        const res = await fetch('/api/data-sources');
+        if (res.ok) {
+          const data = await res.json();
+          setDataSources(
+            data.dataSources.map((ds: { id: string; name: string; type: string }) => ({
+              id: ds.id,
+              name: ds.name,
+              type: ds.type,
+            })),
+          );
+        }
+      } catch {
+        // Silently fail — dropdown will be empty
+      }
+    }
+    loadSources();
+  }, []);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -107,7 +127,7 @@ export function ExplorePageClient() {
       <div className="flex h-full flex-col">
         {/* Data source selector */}
         <DataSourceSelector
-          sources={MOCK_SOURCES}
+          sources={dataSources}
           selectedId={selectedSource}
           onChange={setSelectedSource}
         />

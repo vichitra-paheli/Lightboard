@@ -23,10 +23,11 @@ interface SchemaBrowserProps {
   tables: TableInfo[];
   onClose: () => void;
   sourceName: string;
+  loading?: boolean;
 }
 
 /** Tree view for browsing a data source's schema (tables and columns). */
-export function SchemaBrowser({ tables, onClose, sourceName }: SchemaBrowserProps) {
+export function SchemaBrowser({ tables, onClose, sourceName, loading }: SchemaBrowserProps) {
   const t = useTranslations('dataSources');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
@@ -54,7 +55,11 @@ export function SchemaBrowser({ tables, onClose, sourceName }: SchemaBrowserProp
         </button>
       </div>
 
-      {tables.length === 0 ? (
+      {loading ? (
+        <p className="text-sm animate-pulse" style={{ color: 'var(--color-muted-foreground)' }}>
+          Loading schema...
+        </p>
+      ) : tables.length === 0 ? (
         <p className="text-sm" style={{ color: 'var(--color-muted-foreground)' }}>
           {t('noTables')}
         </p>

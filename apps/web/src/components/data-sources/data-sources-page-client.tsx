@@ -86,9 +86,24 @@ export function DataSourcesPageClient() {
     setView('add');
   }, []);
 
-  const handleBrowseSchema = useCallback((id: string) => {
+  const [schemaTables, setSchemaTables] = useState<{ name: string; schema: string; columns: { name: string; type: string; nullable: boolean; primaryKey: boolean }[] }[]>([]);
+  const [schemaLoading, setSchemaLoading] = useState(false);
+
+  const handleBrowseSchema = useCallback(async (id: string) => {
     setBrowsingSourceId(id);
+    setSchemaTables([]);
+    setSchemaLoading(true);
     setView('schema');
+
+    try {
+      const res = await fetch(`/api/data-sources/${id}/schema`);
+      if (res.ok) {
+        const data = await res.json();
+        setSchemaTables(data.tables ?? []);
+      }
+    } finally {
+      setSchemaLoading(false);
+    }
   }, []);
 
   const handleTestConnection = useCallback(
@@ -121,7 +136,8 @@ export function DataSourcesPageClient() {
     const source = sources.find((s) => s.id === browsingSourceId);
     return (
       <SchemaBrowser
-        tables={[]}
+        tables={schemaTables}
+        loading={schemaLoading}
         onClose={() => { setView('list'); setBrowsingSourceId(null); }}
         sourceName={source?.name ?? ''}
       />
