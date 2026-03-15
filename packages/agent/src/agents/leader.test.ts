@@ -348,6 +348,131 @@ describe('LeaderAgent', () => {
     expect(history.length).toBe(4); // 2 user + 2 assistant
   });
 
+  it('multi-step: query → save scratchpad → load scratchpad', async () => {
+    const scratchpadManager = new ScratchpadManager({ cleanupIntervalMs: 0 });
+
+    const leader = new LeaderAgent({
+      provider: mockProvider([
+        // Turn 1: Leader delegates query
+        [
+          { type: 'tool_call_start', id: 'tc_1', name: 'delegate_query' },
+          {
+            type: 'tool_call_end',
+            id: 'tc_1',
+            name: 'delegate_query',
+            input: { instruction: 'Get sales data', source_id: 'pg-main' },
+          },
+          { type: 'message_end', stopReason: 'tool_use' },
+        ],
+        // QueryAgent internal: execute_query
+        [
+          { type: 'tool_call_start', id: 's1', name: 'execute_query' },
+          {
+            type: 'tool_call_end',
+            id: 's1',
+            name: 'execute_query',
+            input: { source_id: 'pg-main', query_ir: { source: 'pg-main', table: 'orders', select: [{ field: 'region' }], aggregations: [], groupBy: [], orderBy: [], joins: [] } },
+          },
+          { type: 'message_end', stopReason: 'tool_use' },
+        ],
+        // QueryAgent done
+        [
+          { type: 'text_delta', text: 'Got data.' },
+          { type: 'message_end', stopReason: 'end_turn' },
+        ],
+        // Leader saves to scratchpad
+        [
+          { type: 'tool_call_start', id: 'tc_2', name: 'save_scratchpad' },
+          {
+            type: 'tool_call_end',
+            id: 'tc_2',
+            name: 'save_scratchpad',
+            input: {
+              table_name: 'sales_data',
+              rows: [{ region: 'North', total: 5000 }, { region: 'South', total: 3200 }],
+              description: 'Sales by region',
+            },
+          },
+          { type: 'message_end', stopReason: 'tool_use' },
+        ],
+        // Leader loads from scratchpad to verify
+        [
+          { type: 'tool_call_start', id: 'tc_3', name: 'load_scratchpad' },
+          {
+            type: 'tool_call_end',
+            id: 'tc_3',
+            name: 'load_scratchpad',
+            input: { table_name: 'sales_data' },
+          },
+          { type: 'message_end', stopReason: 'tool_use' },
+        ],
+        // Leader summarizes
+        [
+          { type: 'text_delta', text: 'Saved and verified.' },
+          { type: 'message_end', stopReason: 'end_turn' },
+        ],
+      ]),
+      toolContext: mockToolContext(),
+      dataSources: [{ id: 'pg-main', name: 'Main DB', type: 'postgres' }],
+      scratchpadManager,
+    });
+
+    const events = await collectEvents(leader, 'Get sales data and save it');
+
+    // Should have query delegation + scratchpad ops
+    expect(events.some((e) => e.type === 'agent_start')).toBe(true);
+    expect(events.some((e) => e.type === 'done')).toBe(true);
+
+    // Verify scratchpad has the data
+    const scratchpad = scratchpadManager.getOrCreate('test-conv');
+    expect(scratchpad.hasTable('sales_data')).toBe(true);
+    const tables = scratchpad.listTables();
+    expect(tables[0]!.description).toBe('Sales by region');
+
+    // Verify load returned data
+    const loadEvents = events.filter((e) => e.type === 'tool_end' && e.name === 'load_scratchpad') as Array<Extract<AgentEvent, { type: 'tool_end' }>>;
+    expect(loadEvents).toHaveLength(1);
+    expect(loadEvents[0]!.isError).toBe(false);
+    const loadedData = JSON.parse(loadEvents[0]!.result);
+    expect(loadedData.rows).toHaveLength(2);
+
+    await scratchpadManager.destroyAll();
+  });
+
+  it('handles list_scratchpads tool', async () => {
+    const scratchpadManager = new ScratchpadManager({ cleanupIntervalMs: 0 });
+    // Pre-populate scratchpad
+    const pad = scratchpadManager.getOrCreate('test-conv');
+    await pad.saveTable('existing_table', [{ x: 1 }], 'Pre-existing');
+
+    const leader = new LeaderAgent({
+      provider: mockProvider([
+        [
+          { type: 'tool_call_start', id: 'tc_1', name: 'list_scratchpads' },
+          { type: 'tool_call_end', id: 'tc_1', name: 'list_scratchpads', input: {} },
+          { type: 'message_end', stopReason: 'tool_use' },
+        ],
+        [
+          { type: 'text_delta', text: 'Found 1 table.' },
+          { type: 'message_end', stopReason: 'end_turn' },
+        ],
+      ]),
+      toolContext: mockToolContext(),
+      dataSources: [],
+      scratchpadManager,
+    });
+
+    const events = await collectEvents(leader, 'What tables do I have?');
+
+    const toolEnd = events.find((e) => e.type === 'tool_end') as Extract<AgentEvent, { type: 'tool_end' }>;
+    expect(toolEnd.isError).toBe(false);
+    const tables = JSON.parse(toolEnd.result);
+    expect(tables).toHaveLength(1);
+    expect(tables[0].name).toBe('existing_table');
+
+    await scratchpadManager.destroyAll();
+  });
+
   it('resets conversation', async () => {
     const leader = new LeaderAgent({
       provider: mockProvider([
