@@ -1,44 +1,37 @@
 import type { Message, ToolCallResult } from '../provider/types';
-import { buildQueryPrompt } from '../prompt/query-prompt';
-import { queryTools } from '../tools/query-tools';
+import { buildViewPrompt } from '../prompt/view-prompt';
+import { viewTools } from '../tools/view-tools';
 import type { AgentTask, SubAgent, SubAgentConfig, SubAgentResult } from './types';
 
 /**
- * Query specialist sub-agent.
- * Handles schema exploration and data retrieval via get_schema, execute_query, and run_sql.
- * Receives full schema in task context. Does NOT create views — that is the ViewAgent's job.
+ * View specialist sub-agent.
+ * Handles chart type selection and ViewSpec generation.
+ * Has access to create_view and modify_view tools only.
+ * Receives data summary (columns, types, row count, sample rows) in task context.
  */
-export class QueryAgent implements SubAgent {
-  readonly role = 'query' as const;
-  readonly tools = queryTools;
+export class ViewAgent implements SubAgent {
+  readonly role = 'view' as const;
+  readonly tools = viewTools;
   private config: SubAgentConfig;
 
   constructor(config: SubAgentConfig) {
     this.config = config;
   }
 
-  /** Execute a query task and yield the result. */
+  /** Execute a view task and yield the result. */
   async *execute(task: AgentTask): AsyncIterable<SubAgentResult> {
     const result = await this.run(task);
     yield result;
   }
 
-  /** Run a query task and return the structured result. */
+  /** Run a view task and return the structured result. */
   async run(task: AgentTask): Promise<SubAgentResult> {
-    const dataSources = (task.context.dataSources ?? []) as Array<{
-      id: string;
-      name: string;
-      type: string;
-      cachedSchema?: { tables: { name: string; schema: string; columns: { name: string; type: string; nullable: boolean; primaryKey: boolean }[] }[] } | null;
-    }>;
-
-    const systemPrompt = buildQueryPrompt({ dataSources });
+    const systemPrompt = buildViewPrompt(task.context);
     const messages: Message[] = [
       { role: 'user', content: task.instruction },
     ];
 
-    const maxRounds = this.config.maxToolRounds ?? 5;
-    let lastQueryResult: Record<string, unknown> | undefined;
+    const maxRounds = this.config.maxToolRounds ?? 3;
 
     for (let round = 0; round < maxRounds; round++) {
       const toolCalls: ToolCallResult[] = [];
@@ -46,9 +39,11 @@ export class QueryAgent implements SubAgent {
       let textContent = '';
       let hasToolCalls = false;
 
-      const stream = this.config.provider.chat(messages, this.tools, {
-        system: systemPrompt,
-      });
+      const stream = this.config.provider.chat(
+        messages,
+        this.tools,
+        { system: systemPrompt },
+      );
 
       for await (const event of stream) {
         switch (event.type) {
@@ -91,15 +86,17 @@ export class QueryAgent implements SubAgent {
 
       if (!hasToolCalls) {
         return {
-          role: 'query',
+          role: 'view',
           success: true,
-          data: lastQueryResult ?? { text: textContent },
+          data: this.extractViewData(textContent),
           explanation: textContent,
         };
       }
 
-      // Execute tool calls
+      // Execute tool calls and collect results
       const toolResults = [];
+      let lastViewResult: Record<string, unknown> | undefined;
+
       for (const tc of toolCalls) {
         const result = await this.config.toolRouter.execute(tc.name, tc.input);
         toolResults.push({
@@ -108,11 +105,12 @@ export class QueryAgent implements SubAgent {
           isError: result.isError,
         });
 
-        if (!result.isError) {
+        // Capture the view data from create_view or modify_view results
+        if (!result.isError && (tc.name === 'create_view' || tc.name === 'modify_view')) {
           try {
-            lastQueryResult = JSON.parse(result.content) as Record<string, unknown>;
+            lastViewResult = JSON.parse(result.content) as Record<string, unknown>;
           } catch {
-            lastQueryResult = { raw: result.content };
+            // ignore parse failures
           }
         }
       }
@@ -122,14 +120,37 @@ export class QueryAgent implements SubAgent {
         content: '',
         toolResults,
       });
+
+      // If this is the last round and we have a view result, return it
+      if (round === maxRounds - 1 && lastViewResult) {
+        return {
+          role: 'view',
+          success: true,
+          data: lastViewResult,
+          explanation: textContent || 'View created successfully',
+        };
+      }
     }
 
     return {
-      role: 'query',
+      role: 'view',
       success: false,
-      data: lastQueryResult ?? {},
-      explanation: 'Exceeded maximum tool rounds',
+      data: {},
+      explanation: 'Exceeded maximum tool rounds without producing a view',
       error: 'max_tool_rounds',
     };
+  }
+
+  /** Extract structured view data from the agent's text response. */
+  private extractViewData(text: string): Record<string, unknown> {
+    const jsonMatch = text.match(/```json\s*([\s\S]*?)```/);
+    if (jsonMatch?.[1]) {
+      try {
+        return JSON.parse(jsonMatch[1]) as Record<string, unknown>;
+      } catch {
+        // fall through
+      }
+    }
+    return { rawText: text };
   }
 }
