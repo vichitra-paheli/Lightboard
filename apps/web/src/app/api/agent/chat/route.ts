@@ -21,7 +21,7 @@ import {
 import { resolveAIProvider } from '@/lib/ai-provider';
 
 /** Maximum duration for agent processing in milliseconds. */
-const AGENT_TIMEOUT_MS = 60_000;
+const AGENT_TIMEOUT_MS = 180_000;
 
 /** Redis TTL for conversation sessions in seconds. */
 const CONVERSATION_TTL_SEC = 3600;
@@ -196,6 +196,12 @@ async function handleNonStreaming(
     });
   } catch (err) {
     if (err instanceof LLMError) {
+      if (err.statusCode === 401) {
+        return NextResponse.json(
+          { error: 'Invalid API key. Check your AI model configuration in Settings.' },
+          { status: 401 },
+        );
+      }
       if (err.statusCode === 429) {
         return NextResponse.json(
           { error: 'AI service is busy, please retry in a moment.' },
@@ -208,6 +214,10 @@ async function handleNonStreaming(
           { status: 502 },
         );
       }
+      return NextResponse.json(
+        { error: `AI provider error: ${err.message}` },
+        { status: err.statusCode ?? 500 },
+      );
     }
 
     if (err instanceof DataSourceError) {

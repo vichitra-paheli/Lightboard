@@ -10,9 +10,28 @@ export function buildSystemPrompt(context: {
 
   if (context.dataSources.length > 0) {
     const sourceList = context.dataSources
-      .map((s) => `  - "${s.name}" (id: ${s.id}, type: ${s.type})`)
+      .map((s) => `  - "${s.name}" (id: "${s.id}", type: ${s.type})`)
       .join('\n');
     parts.push(`\nAvailable data sources:\n${sourceList}`);
+
+    // Add concrete tool call examples using real source IDs
+    const firstSource = context.dataSources[0];
+    if (firstSource) {
+      parts.push(`
+## Tool call examples
+
+To get the schema of "${firstSource.name}":
+\`\`\`json
+{"name": "get_schema", "arguments": {"source_id": "${firstSource.id}"}}
+\`\`\`
+
+To query data from "${firstSource.name}":
+\`\`\`json
+{"name": "execute_query", "arguments": {"source_id": "${firstSource.id}", "query_ir": {"source": "${firstSource.id}", "table": "TABLE_NAME", "select": [{"field": "COLUMN"}], "aggregations": [], "groupBy": [], "orderBy": [], "joins": [], "limit": 100}}}
+\`\`\`
+
+IMPORTANT: Always use the exact source_id shown above. Start by calling get_schema to discover tables and columns.`);
+    }
   }
 
   if (context.currentView) {

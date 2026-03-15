@@ -146,7 +146,7 @@ export function AIModelSettings() {
         )}
 
         {/* Save */}
-        <Button onClick={handleSave} disabled={saving || !apiKey || apiKey === '********'}>
+        <Button onClick={handleSave} disabled={saving || !apiKey}>
           {saving ? t('saving') : t('save')}
         </Button>
       </CardContent>

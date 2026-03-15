@@ -84,7 +84,10 @@ export class ToolRouter {
   private async handleGetSchema(input: Record<string, unknown>): Promise<ToolExecutionResult> {
     const parsed = toolInputSchemas.get_schema.safeParse(input);
     if (!parsed.success) {
-      return { content: `Invalid input: ${parsed.error.message}`, isError: true };
+      return {
+        content: `Invalid input for get_schema. Expected: {"source_id": "<data-source-id>"}. Got: ${JSON.stringify(input)}. Error: ${parsed.error.message}`,
+        isError: true,
+      };
     }
 
     const schema = await this.context.getSchema(parsed.data.source_id);
@@ -95,7 +98,10 @@ export class ToolRouter {
   private async handleExecuteQuery(input: Record<string, unknown>): Promise<ToolExecutionResult> {
     const parsed = toolInputSchemas.execute_query.safeParse(input);
     if (!parsed.success) {
-      return { content: `Invalid input: ${parsed.error.message}`, isError: true };
+      return {
+        content: `Invalid input for execute_query. Expected: {"source_id": "<id>", "query_ir": {"source": "<id>", "table": "<name>", ...}}. Got: ${JSON.stringify(input).slice(0, 200)}. Error: ${parsed.error.message}`,
+        isError: true,
+      };
     }
 
     const result = await this.context.executeQuery(parsed.data.source_id, parsed.data.query_ir);

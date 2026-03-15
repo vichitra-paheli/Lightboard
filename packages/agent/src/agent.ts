@@ -63,6 +63,9 @@ export class Agent {
       currentView,
     });
 
+    let consecutiveFailures = 0;
+    const MAX_CONSECUTIVE_FAILURES = 3;
+
     for (let round = 0; round < this.maxToolRounds; round++) {
       const toolCalls: ToolCallResult[] = [];
       const toolInputBuffers = new Map<string, string>();
@@ -133,6 +136,7 @@ export class Agent {
 
       // Execute tool calls and feed results back
       const toolResults = [];
+      let allFailed = true;
       for (const tc of toolCalls) {
         const result = await this.toolRouter.execute(tc.name, tc.input);
         toolResults.push({
@@ -140,7 +144,16 @@ export class Agent {
           content: result.content,
           isError: result.isError,
         });
+        if (!result.isError) allFailed = false;
         yield { type: 'tool_end', name: tc.name, result: result.content, isError: result.isError };
+      }
+
+      // Circuit breaker: stop if tools keep failing
+      consecutiveFailures = allFailed ? consecutiveFailures + 1 : 0;
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+        yield { type: 'text', text: '\n\nI was unable to complete this request after multiple attempts. Please check your data source configuration and try again.' };
+        yield { type: 'done', stopReason: 'tool_failure' };
+        return;
       }
 
       // Add tool results as user message for next round
