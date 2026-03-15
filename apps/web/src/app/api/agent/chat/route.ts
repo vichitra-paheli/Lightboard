@@ -4,6 +4,7 @@ import {
   getDataSourceConnection,
   introspectSchema,
   executeQueryIR,
+  executeRawSQL,
   DataSourceError,
 } from '@/lib/data-source-service';
 import { checkRateLimit, addRateLimitHeaders } from '@/lib/rate-limit';
@@ -104,9 +105,25 @@ export const POST = withAuth(async (req, { db, orgId }) => {
       const schema = await introspectSchema(connection);
       return schema as unknown as Record<string, unknown>;
     },
-    executeQuery: async (srcId: string, queryIR: Record<string, unknown>) => {
+    executeQuery: async (srcId: string, rawQueryIR: Record<string, unknown> | string) => {
+      // Local models sometimes send queryIR as a JSON string — parse it
+      let queryIR: Record<string, unknown>;
+      if (typeof rawQueryIR === 'string') {
+        try {
+          queryIR = JSON.parse(rawQueryIR) as Record<string, unknown>;
+        } catch {
+          throw new DataSourceError('Invalid QueryIR: received string that is not valid JSON', 'validation');
+        }
+      } else {
+        queryIR = rawQueryIR;
+      }
       const connection = await getDataSourceConnection(adminDb, orgId, srcId);
       const result = await executeQueryIR(connection, queryIR);
+      return result as unknown as Record<string, unknown>;
+    },
+    runSQL: async (srcId: string, sql: string) => {
+      const connection = await getDataSourceConnection(adminDb, orgId, srcId);
+      const result = await executeRawSQL(connection, sql);
       return result as unknown as Record<string, unknown>;
     },
   };

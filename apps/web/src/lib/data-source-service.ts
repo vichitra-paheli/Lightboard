@@ -231,6 +231,56 @@ export async function executeQueryIR(
 }
 
 /**
+ * Executes a raw SELECT SQL query with safety guardrails.
+ * Used as a fallback when QueryIR can't express complex joins.
+ * Enforces: read-only transaction, statement timeout, DDL rejection, row limit.
+ */
+export async function executeRawSQL(
+  connection: ConnectionConfig,
+  sql: string,
+): Promise<QueryResult> {
+  const trimmed = sql.trim();
+  if (!trimmed.toUpperCase().startsWith('SELECT')) {
+    throw new DataSourceError('Only SELECT queries are allowed', 'validation');
+  }
+  checkForDDL(trimmed);
+
+  // Inject LIMIT if not present
+  if (!trimmed.toUpperCase().includes('LIMIT')) {
+    const limited = `${trimmed} LIMIT ${DEFAULT_LIMIT}`;
+    return executeRawSQLInternal(connection, limited);
+  }
+  return executeRawSQLInternal(connection, trimmed);
+}
+
+async function executeRawSQLInternal(
+  connection: ConnectionConfig,
+  sql: string,
+): Promise<QueryResult> {
+  const pool = new pg.Pool({ ...connection, connectionTimeoutMillis: 5000, max: 1 });
+  const startTime = performance.now();
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN READ ONLY');
+    await client.query(`SET statement_timeout = ${STATEMENT_TIMEOUT_MS}`);
+    const result = await client.query(sql);
+    await client.query('COMMIT');
+
+    const executionTimeMs = Math.round(performance.now() - startTime);
+    const columns = result.fields.map((f) => ({ name: f.name, type: mapPgDataTypeId(f.dataTypeID) }));
+    const rows = result.rows.length > MAX_ROWS ? result.rows.slice(0, MAX_ROWS) : result.rows;
+    return { columns, rows, rowCount: rows.length, executionTimeMs };
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch { /* ignore */ }
+    throw classifyConnectionError(err);
+  } finally {
+    client.release();
+    await pool.end();
+  }
+}
+
+/**
  * Checks SQL for DDL keywords as a secondary safety measure.
  * The read-only transaction is the primary defense.
  */

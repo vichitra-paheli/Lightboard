@@ -80,6 +80,9 @@ export function ExplorePageClient() {
   /** Consumes an SSE stream and updates messages progressively. */
   const consumeSSEStream = useCallback(
     async (response: Response, assistantMsgId: string) => {
+      // Track the last successful query result from run_sql or execute_query
+      let lastQueryRows: Record<string, unknown>[] | null = null;
+
       for await (const sseEvent of parseSSE(response)) {
         try {
           const data = JSON.parse(sseEvent.data);
@@ -126,14 +129,25 @@ export function ExplorePageClient() {
                     : m,
                 ),
               );
+              // Capture query results from run_sql or execute_query for chart rendering
+              if (!data.isError && (data.name === 'run_sql' || data.name === 'execute_query')) {
+                try {
+                  const parsed = JSON.parse(data.result);
+                  if (parsed.rows) {
+                    lastQueryRows = parsed.rows;
+                  }
+                } catch { /* ignore parse errors */ }
+              }
               break;
 
             case 'view_created':
               if (data.viewSpec) {
                 setCurrentView(data.viewSpec);
-                // If query results were included, use them directly
+                // Use query results: from event, from captured tool results, or fetch
                 if (data.queryResult?.rows) {
                   setViewData(data.queryResult.rows);
+                } else if (lastQueryRows) {
+                  setViewData(lastQueryRows);
                 } else {
                   // Otherwise, execute the ViewSpec's query to get data
                   const query = data.viewSpec.query;

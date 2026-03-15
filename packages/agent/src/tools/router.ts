@@ -7,6 +7,8 @@ export interface ToolContext {
   getSchema: (sourceId: string) => Promise<Record<string, unknown>>;
   /** Execute a query against a data source. */
   executeQuery: (sourceId: string, queryIR: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  /** Execute raw SQL against a data source (for complex joins). */
+  runSQL?: (sourceId: string, sql: string) => Promise<Record<string, unknown>>;
   /** Get the current view state. */
   getCurrentView?: () => Record<string, unknown> | null;
 }
@@ -42,6 +44,10 @@ const toolInputSchemas = {
     view_id: z.string().min(1),
     patch: z.record(z.unknown()),
   }),
+  run_sql: z.object({
+    source_id: z.string().min(1),
+    sql: z.string().min(1),
+  }),
 };
 
 /**
@@ -61,12 +67,23 @@ export class ToolRouter {
   async execute(toolName: string, input: Record<string, unknown>): Promise<ToolExecutionResult> {
     // Auto-parse stringified JSON values — local models often send nested objects as strings
     const normalizedInput = this.normalizeInput(input);
+    // Debug: log normalization for troubleshooting local model issues
+    for (const [key, val] of Object.entries(input)) {
+      if (typeof val === 'string' && typeof normalizedInput[key] !== 'string') {
+        console.log(`[ToolRouter] Normalized "${key}" from string to ${typeof normalizedInput[key]}`);
+      }
+      if (typeof val === 'string' && typeof normalizedInput[key] === 'string' && val.includes('{')) {
+        console.log(`[ToolRouter] WARNING: "${key}" is still a string after normalization. First 100 chars: ${val.slice(0, 100)}`);
+      }
+    }
     try {
       switch (toolName) {
         case 'get_schema':
           return await this.handleGetSchema(normalizedInput);
         case 'execute_query':
           return await this.handleExecuteQuery(normalizedInput);
+        case 'run_sql':
+          return await this.handleRunSQL(normalizedInput);
         case 'create_view':
           return await this.handleCreateView(normalizedInput);
         case 'modify_view':
@@ -146,6 +163,21 @@ export class ToolRouter {
       content: JSON.stringify({ viewId: parsed.data.view_id, viewSpec: updated }),
       isError: false,
     };
+  }
+
+  /** Handle run_sql tool call — raw SQL for complex joins. */
+  private async handleRunSQL(input: Record<string, unknown>): Promise<ToolExecutionResult> {
+    const parsed = toolInputSchemas.run_sql.safeParse(input);
+    if (!parsed.success) {
+      return { content: `Invalid input for run_sql: ${parsed.error.message}`, isError: true };
+    }
+
+    if (!this.context.runSQL) {
+      return { content: 'run_sql is not available', isError: true };
+    }
+
+    const result = await this.context.runSQL(parsed.data.source_id, parsed.data.sql);
+    return { content: JSON.stringify(result, null, 2), isError: false };
   }
 
   /** Get a stored view by ID (for testing). */
