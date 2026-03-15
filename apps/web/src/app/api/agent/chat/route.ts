@@ -21,7 +21,7 @@ import {
 import { resolveAIProvider } from '@/lib/ai-provider';
 
 /** Maximum duration for agent processing in milliseconds. */
-const AGENT_TIMEOUT_MS = 180_000;
+const AGENT_TIMEOUT_MS = 300_000;
 
 /** Redis TTL for conversation sessions in seconds. */
 const CONVERSATION_TTL_SEC = 3600;
@@ -77,17 +77,21 @@ export const POST = withAuth(async (req, { db, orgId }) => {
     );
   }
 
-  // Load org's data sources
+  // Load org's data sources with cached schemas
   const orgSources = await db
-    .select({ id: dataSources.id, name: dataSources.name, type: dataSources.type })
+    .select({ id: dataSources.id, name: dataSources.name, type: dataSources.type, config: dataSources.config })
     .from(dataSources)
     .where(eq(dataSources.orgId, orgId));
 
-  const agentDataSources: AgentDataSource[] = orgSources.map((s) => ({
-    id: s.id,
-    name: s.name,
-    type: s.type,
-  }));
+  const agentDataSources: AgentDataSource[] = orgSources.map((s) => {
+    const config = s.config as Record<string, unknown> | null;
+    return {
+      id: s.id,
+      name: s.name,
+      type: s.type,
+      cachedSchema: (config?.cachedSchema as Record<string, unknown>) ?? null,
+    };
+  });
 
   // Build ToolContext with real data source operations
   // Use adminDb instead of the RLS-scoped pool client because the SSE streaming

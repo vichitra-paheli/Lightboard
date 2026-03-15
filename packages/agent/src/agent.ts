@@ -16,6 +16,7 @@ export interface AgentDataSource {
   id: string;
   name: string;
   type: string;
+  cachedSchema?: Record<string, unknown> | null;
 }
 
 /** Configuration for creating an Agent. */
@@ -59,7 +60,7 @@ export class Agent {
     this.conversation.addMessage({ role: 'user', content: userMessage });
 
     const systemPrompt = buildSystemPrompt({
-      dataSources: this.dataSources,
+      dataSources: this.dataSources as Parameters<typeof buildSystemPrompt>[0]['dataSources'],
       currentView,
     });
 

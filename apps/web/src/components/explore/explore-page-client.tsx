@@ -1,8 +1,24 @@
 'use client';
 
-import { ChartThemeProvider, type ViewSpec } from '@lightboard/viz-core';
+import {
+  ChartThemeProvider,
+  defaultPanelRegistry,
+  barChartPlugin,
+  timeSeriesLinePlugin,
+  statCardPlugin,
+  dataTablePlugin,
+  type ViewSpec,
+} from '@lightboard/viz-core';
 import { useTranslations } from 'next-intl';
 import { useCallback, useEffect, useRef, useState } from 'react';
+
+// Register chart panel plugins on module load
+if (!defaultPanelRegistry.has('bar-chart')) {
+  defaultPanelRegistry.register(barChartPlugin as any);
+  defaultPanelRegistry.register(timeSeriesLinePlugin as any);
+  defaultPanelRegistry.register(statCardPlugin as any);
+  defaultPanelRegistry.register(dataTablePlugin as any);
+}
 import { ViewRenderer } from '@/components/view-renderer';
 import { ChatPanel } from './chat-panel';
 import type { ChatMessageData } from './chat-message';
@@ -115,8 +131,29 @@ export function ExplorePageClient() {
             case 'view_created':
               if (data.viewSpec) {
                 setCurrentView(data.viewSpec);
+                // If query results were included, use them directly
                 if (data.queryResult?.rows) {
                   setViewData(data.queryResult.rows);
+                } else {
+                  // Otherwise, execute the ViewSpec's query to get data
+                  const query = data.viewSpec.query;
+                  const sourceId = query?.source;
+                  if (sourceId) {
+                    fetch(`/api/data-sources/${sourceId}/query`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ queryIR: query }),
+                    })
+                      .then((r) => (r.ok ? r.json() : null))
+                      .then((result) => {
+                        if (result?.rows) {
+                          setViewData(result.rows);
+                        }
+                      })
+                      .catch(() => {
+                        // Query execution failed — view will show loading state
+                      });
+                  }
                 }
               }
               break;
@@ -248,7 +285,23 @@ export function ExplorePageClient() {
 
           if (result.viewSpec) {
             setCurrentView(result.viewSpec);
-            setViewData(result.queryResult?.rows ?? null);
+            if (result.queryResult?.rows) {
+              setViewData(result.queryResult.rows);
+            } else {
+              // Execute the ViewSpec's query to get data for the chart
+              const query = result.viewSpec.query;
+              const srcId = query?.source;
+              if (srcId) {
+                fetch(`/api/data-sources/${srcId}/query`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ queryIR: query }),
+                })
+                  .then((r) => (r.ok ? r.json() : null))
+                  .then((qr) => { if (qr?.rows) setViewData(qr.rows); })
+                  .catch(() => {});
+              }
+            }
           }
         }
       } catch (err) {

@@ -59,16 +59,18 @@ export class ToolRouter {
 
   /** Execute a tool call and return the result. Errors are returned, not thrown. */
   async execute(toolName: string, input: Record<string, unknown>): Promise<ToolExecutionResult> {
+    // Auto-parse stringified JSON values — local models often send nested objects as strings
+    const normalizedInput = this.normalizeInput(input);
     try {
       switch (toolName) {
         case 'get_schema':
-          return await this.handleGetSchema(input);
+          return await this.handleGetSchema(normalizedInput);
         case 'execute_query':
-          return await this.handleExecuteQuery(input);
+          return await this.handleExecuteQuery(normalizedInput);
         case 'create_view':
-          return await this.handleCreateView(input);
+          return await this.handleCreateView(normalizedInput);
         case 'modify_view':
-          return await this.handleModifyView(input);
+          return await this.handleModifyView(normalizedInput);
         default:
           return { content: `Unknown tool: ${toolName}`, isError: true };
       }
@@ -149,5 +151,50 @@ export class ToolRouter {
   /** Get a stored view by ID (for testing). */
   getView(viewId: string): Record<string, unknown> | undefined {
     return this.viewStore.get(viewId);
+  }
+
+  /**
+   * Normalizes tool input by auto-parsing stringified JSON values.
+   * Local LLMs often send nested objects as JSON strings rather than parsed objects.
+   * Handles double-escaped strings (string of a string of JSON).
+   */
+  private normalizeInput(input: Record<string, unknown>): Record<string, unknown> {
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(input)) {
+      if (typeof value === 'string') {
+        result[key] = this.tryParseJSON(value);
+      } else {
+        result[key] = value;
+      }
+    }
+    return result;
+  }
+
+  /** Attempts to parse a string as JSON, handling double-escaping. */
+  private tryParseJSON(value: string): unknown {
+    let current = value.trim();
+    // Try up to 2 levels of unescaping (double-encoded strings)
+    for (let i = 0; i < 2; i++) {
+      if ((current.startsWith('{') && current.endsWith('}')) ||
+          (current.startsWith('[') && current.endsWith(']'))) {
+        try {
+          return JSON.parse(current);
+        } catch {
+          return value; // Not valid JSON
+        }
+      }
+      // Try unquoting — model may send '"{ ... }"' (quoted JSON string)
+      if (current.startsWith('"') && current.endsWith('"')) {
+        try {
+          current = JSON.parse(current) as string;
+          if (typeof current !== 'string') return current; // Already parsed to object
+        } catch {
+          return value;
+        }
+      } else {
+        break;
+      }
+    }
+    return value;
   }
 }

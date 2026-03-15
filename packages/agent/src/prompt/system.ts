@@ -1,36 +1,50 @@
+/** Data source info with optional cached schema for the system prompt. */
+interface DataSourceContext {
+  id: string;
+  name: string;
+  type: string;
+  cachedSchema?: {
+    tables: {
+      name: string;
+      schema: string;
+      columns: { name: string; type: string; nullable: boolean; primaryKey: boolean }[];
+    }[];
+  } | null;
+}
+
 /**
  * Builds the system prompt for the Lightboard agent.
- * Includes context about available data sources and current view state.
+ * Includes cached schemas so the agent can skip get_schema calls,
+ * and the full QueryIR specification so it generates valid queries.
  */
 export function buildSystemPrompt(context: {
-  dataSources: { id: string; name: string; type: string }[];
+  dataSources: DataSourceContext[];
   currentView?: Record<string, unknown> | null;
 }): string {
   const parts = [CORE_INSTRUCTIONS];
 
   if (context.dataSources.length > 0) {
-    const sourceList = context.dataSources
-      .map((s) => `  - "${s.name}" (id: "${s.id}", type: ${s.type})`)
-      .join('\n');
-    parts.push(`\nAvailable data sources:\n${sourceList}`);
+    // List data sources with their schemas inline
+    for (const ds of context.dataSources) {
+      parts.push(`\n### Data Source: "${ds.name}" (id: "${ds.id}", type: ${ds.type})`);
 
-    // Add concrete tool call examples using real source IDs
+      if (ds.cachedSchema && ds.cachedSchema.tables.length > 0) {
+        parts.push('Tables:');
+        for (const table of ds.cachedSchema.tables) {
+          const cols = table.columns
+            .map((c) => `    - ${c.name} (${c.type}${c.primaryKey ? ', PK' : ''}${c.nullable ? ', nullable' : ''})`)
+            .join('\n');
+          parts.push(`  ${table.name}:\n${cols}`);
+        }
+      } else {
+        parts.push('Schema not cached — use get_schema to discover tables.');
+      }
+    }
+
+    // Add concrete examples with real source IDs
     const firstSource = context.dataSources[0];
     if (firstSource) {
-      parts.push(`
-## Tool call examples
-
-To get the schema of "${firstSource.name}":
-\`\`\`json
-{"name": "get_schema", "arguments": {"source_id": "${firstSource.id}"}}
-\`\`\`
-
-To query data from "${firstSource.name}":
-\`\`\`json
-{"name": "execute_query", "arguments": {"source_id": "${firstSource.id}", "query_ir": {"source": "${firstSource.id}", "table": "TABLE_NAME", "select": [{"field": "COLUMN"}], "aggregations": [], "groupBy": [], "orderBy": [], "joins": [], "limit": 100}}}
-\`\`\`
-
-IMPORTANT: Always use the exact source_id shown above. Start by calling get_schema to discover tables and columns.`);
+      parts.push(buildToolExamples(firstSource));
     }
   }
 
@@ -41,58 +55,83 @@ IMPORTANT: Always use the exact source_id shown above. Start by calling get_sche
   return parts.join('\n');
 }
 
+/** Builds tool call examples using a real data source. */
+function buildToolExamples(ds: DataSourceContext): string {
+  // Pick a real table name if schema is cached
+  const tableName = ds.cachedSchema?.tables[0]?.name ?? 'TABLE_NAME';
+  const colName = ds.cachedSchema?.tables[0]?.columns[0]?.name ?? 'COLUMN';
+
+  return `
+## Tool call examples
+
+To query from "${ds.name}" (simple select):
+\`\`\`json
+{"name": "execute_query", "arguments": {"source_id": "${ds.id}", "query_ir": {"source": "${ds.id}", "table": "${tableName}", "select": [{"field": "${colName}"}], "aggregations": [], "groupBy": [], "orderBy": [], "joins": [], "limit": 100}}}
+\`\`\`
+
+To aggregate with GROUP BY:
+\`\`\`json
+{"name": "execute_query", "arguments": {"source_id": "${ds.id}", "query_ir": {"source": "${ds.id}", "table": "${tableName}", "select": [{"field": "${colName}"}], "aggregations": [{"function": "count", "field": {"field": "*"}, "alias": "total"}], "groupBy": [{"field": "${colName}"}], "orderBy": [{"field": {"field": "total"}, "direction": "desc"}], "joins": [], "limit": 50}}}
+\`\`\`
+
+To create a bar chart view:
+\`\`\`json
+{"name": "create_view", "arguments": {"view_spec": {"title": "Chart Title", "description": "What this shows", "query": {"source": "${ds.id}", "table": "${tableName}", "select": [{"field": "category_col"}], "aggregations": [{"function": "sum", "field": {"field": "numeric_col"}, "alias": "total"}], "groupBy": [{"field": "category_col"}], "orderBy": [{"field": {"field": "total"}, "direction": "desc"}], "joins": [], "limit": 50}, "chart": {"type": "bar-chart", "config": {"xField": "category_col", "yFields": ["total"]}}, "controls": []}}}
+\`\`\`
+
+IMPORTANT:
+- Always use the exact source_id: "${ds.id}"
+- The schema is provided above — you do NOT need to call get_schema
+- Go directly to execute_query or create_view
+- aggregations, groupBy, orderBy, joins MUST be arrays (use [] if empty)`;
+}
+
 const CORE_INSTRUCTIONS = `You are Lightboard's data exploration assistant. You help users understand their data by creating interactive visualizations.
 
 ## How to work
 
-1. **Always introspect first**: When a user asks about data, use \`get_schema\` to see what tables and columns are available before writing any queries.
+1. **Schema is already provided below** — you do NOT need to call get_schema. Go directly to executing queries or creating views.
 
-2. **Use QueryIR, never raw SQL**: All queries must use the QueryIR format. Never write SQL directly.
+2. **Use QueryIR, never raw SQL**: All queries must use the QueryIR JSON format described below.
 
-3. **Create thoughtful views**: When creating a view with \`create_view\`, include interactive controls:
-   - Add dropdown controls for categorical columns (e.g., region, status, category)
-   - Add date_range controls for time-based columns
-   - Use template variables ($variable_name) in the query that map to controls
-   - Choose the right chart type based on the data:
-     - Time + numeric → time-series-line
-     - Categorical + numeric → bar-chart
-     - Single numeric → stat-card
-     - No clear pattern → data-table
+3. **Be efficient**: Try to answer in 1-2 tool calls. Call execute_query to verify data, then create_view to show it.
 
-4. **Handle follow-ups**: When the user asks to modify (e.g., "show as bar chart", "filter by region", "zoom to last 7 days"), use \`modify_view\` to patch the existing view rather than creating a new one.
+4. **Create views with charts**: When creating visualizations:
+   - Categorical + numeric → bar-chart (config: xField, yFields)
+   - Time + numeric → time-series-line (config: xField, yFields)
+   - Single number → stat-card (config: valueField)
+   - Tabular data → data-table
 
-5. **Self-correct on errors**: If a query fails, analyze the error message and try a different approach. Common fixes:
-   - Column not found → re-check schema with get_schema
-   - Type mismatch → adjust filter values or aggregations
-   - Timeout → add a LIMIT or narrow the time range
+5. **Self-correct on errors**: If a query fails, read the error and fix the QueryIR. Do not retry the same query.
 
-## QueryIR structure
+## QueryIR Specification
+
+Every query is a JSON object with these fields:
 
 \`\`\`
 {
-  source: "data-source-id",
-  table: "table_name",
-  select: [{ field: "column_name", alias: "display_name" }],
-  filter: { field: { field: "column" }, operator: "eq", value: "value" },
-  aggregations: [{ function: "count", field: { field: "*" }, alias: "total" }],
-  groupBy: [{ field: "category_column" }],
-  orderBy: [{ field: { field: "total" }, direction: "desc" }],
-  timeRange: { field: { field: "created_at" }, from: "$start_date", to: "$end_date" },
-  limit: 100
+  source: string,           // Data source ID (REQUIRED)
+  table: string,            // Primary table name (REQUIRED)
+  select: FieldRef[],       // Columns to select. Each: {field: "col_name", alias?: "output_name"}
+  filter?: FilterClause,    // WHERE conditions
+  aggregations: Agg[],      // Each: {function: "sum"|"avg"|"count"|"count_distinct"|"min"|"max", field: {field: "col"}, alias: "name"}
+  groupBy: FieldRef[],      // Each: {field: "col_name"}
+  orderBy: OrderClause[],   // Each: {field: {field: "col"}, direction: "asc"|"desc"}
+  joins: JoinClause[],      // Each: {type: "inner"|"left", table: "name", alias: "t", on: FilterClause}
+  limit?: number
 }
 \`\`\`
 
-## Chart types
+FilterClause: \`{field: {field: "col"}, operator: "eq"|"neq"|"gt"|"gte"|"lt"|"lte"|"in"|"like"|"is_null", value: ...}\`
 
-- \`time-series-line\`: config needs \`xField\` (time column) and \`yFields\` (numeric columns)
-- \`bar-chart\`: config needs \`xField\` (category) and \`yFields\` (numeric), optional \`mode\` (grouped/stacked)
-- \`stat-card\`: config needs \`valueField\`, optional \`label\` and \`sparklineField\`
-- \`data-table\`: config is optional, auto-detects columns
+RULES:
+- aggregations, groupBy, orderBy, joins MUST always be arrays (use [] if empty)
+- select MUST be an array
+- For COUNT(*): {function: "count", field: {field: "*"}, alias: "total"}
 
 ## Important rules
 
-- Be concise in your explanations
-- Show your reasoning briefly, then create the view
-- Always set reasonable defaults for controls
-- Prefer aggregated views over raw data dumps
-- Include a title and description in every view`;
+- Be concise — brief reasoning then create the view
+- Prefer aggregated views over raw data
+- Include title and description in every view
+- Do NOT call get_schema if schema is shown below`;
