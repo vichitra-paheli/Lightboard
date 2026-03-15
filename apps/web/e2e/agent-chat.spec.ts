@@ -12,7 +12,7 @@ import { expect, test } from '@playwright/test';
  */
 
 const UNIQUE = Date.now();
-const TEST_ORG = `Agent E2E Org ${UNIQUE}`;
+const TEST_ORG = `AgentE2E${UNIQUE}`;
 const TEST_NAME = 'Agent Tester';
 const TEST_EMAIL = `agent-e2e-${UNIQUE}@test.com`;
 const TEST_PASSWORD = 'agent-e2e-password-123';
@@ -32,7 +32,7 @@ test.describe('agent chat API', () => {
         orgName: TEST_ORG,
       },
     });
-    expect(regRes.status()).toBe(200);
+    expect(regRes.status()).toBe(201);
 
     // Login to get session
     const loginRes = await request.post('/api/auth/login', {
