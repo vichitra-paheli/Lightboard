@@ -21,7 +21,7 @@ if (!defaultPanelRegistry.has('bar-chart')) {
 }
 import { ViewRenderer } from '@/components/view-renderer';
 import { ChatPanel } from './chat-panel';
-import type { ChatMessageData } from './chat-message';
+import type { ChatMessageData, ToolCallData, AgentIndicatorData } from './chat-message';
 import { DataSourceSelector, type DataSourceOption } from './data-source-selector';
 import { parseSSE } from '@/lib/sse-parser';
 
@@ -108,21 +108,24 @@ export function ExplorePageClient() {
               );
               break;
 
-            case 'tool_start':
+            case 'tool_start': {
+              const newToolCall: ToolCallData = {
+                name: data.name,
+                status: 'running' as const,
+                ...(data.input ? { input: data.input } : {}),
+              };
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === assistantMsgId
                     ? {
                         ...m,
-                        toolCalls: [
-                          ...(m.toolCalls ?? []),
-                          { name: data.name, status: 'running' as const },
-                        ],
+                        toolCalls: [...(m.toolCalls ?? []), newToolCall],
                       }
                     : m,
                 ),
               );
               break;
+            }
 
             case 'tool_end':
               setMessages((prev) =>
@@ -132,7 +135,12 @@ export function ExplorePageClient() {
                         ...m,
                         toolCalls: m.toolCalls?.map((tc) =>
                           tc.name === data.name && tc.status === 'running'
-                            ? { ...tc, status: data.isError ? ('error' as const) : ('done' as const) }
+                            ? {
+                                ...tc,
+                                status: data.isError ? ('error' as const) : ('done' as const),
+                                ...(data.result !== undefined ? { result: String(data.result) } : {}),
+                                ...(data.durationMs !== undefined ? { durationMs: data.durationMs } : {}),
+                              }
                             : tc,
                         ),
                       }
@@ -148,6 +156,49 @@ export function ExplorePageClient() {
                   }
                 } catch { /* ignore parse errors */ }
               }
+              break;
+
+            case 'agent_start': {
+              const newDelegation: AgentIndicatorData = {
+                agent: data.agent,
+                task: data.task,
+                status: 'running' as const,
+              };
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMsgId
+                    ? {
+                        ...m,
+                        agentDelegations: [
+                          ...(m.agentDelegations ?? []),
+                          newDelegation,
+                        ],
+                      }
+                    : m,
+                ),
+              );
+              break;
+            }
+
+            case 'agent_end':
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMsgId
+                    ? {
+                        ...m,
+                        agentDelegations: m.agentDelegations?.map((d) =>
+                          d.agent === data.agent && d.status === 'running'
+                            ? {
+                                ...d,
+                                status: 'done' as const,
+                                ...(data.summary ? { summary: data.summary } : {}),
+                              }
+                            : d,
+                        ),
+                      }
+                    : m,
+                ),
+              );
               break;
 
             case 'view_created':
@@ -249,6 +300,7 @@ export function ExplorePageClient() {
           role: 'assistant',
           content: '',
           toolCalls: [],
+          agentDelegations: [],
           isStreaming: true,
         },
       ]);

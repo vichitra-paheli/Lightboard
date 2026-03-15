@@ -103,7 +103,16 @@
   "chat": {
     "thinking": "Thinking...",
     "thinkingLabel": "View reasoning",
-    "copyCode": "Copy"
+    "copyCode": "Copy",
+    "agentQuery": "Querying data...",
+    "agentView": "Creating visualization...",
+    "agentInsights": "Analyzing patterns...",
+    "agentDone": "Done",
+    "toolInput": "Input",
+    "toolOutput": "Output",
+    "toolDuration": "Duration",
+    "toolExpand": "Show details",
+    "toolCollapse": "Hide details"
   },
   "view": {
     "loading": "Loading data...",
