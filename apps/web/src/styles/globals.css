@@ -83,6 +83,95 @@
 }
 
 /*
+ * Markdown prose styling for chat messages.
+ * Uses Tailwind theme classes where possible; CSS variables for fine-grained control.
+ */
+.prose-container {
+  line-height: 1.6;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+.prose-container h1,
+.prose-container h2,
+.prose-container h3,
+.prose-container h4,
+.prose-container h5,
+.prose-container h6 {
+  font-weight: 600;
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+  line-height: 1.3;
+}
+
+.prose-container h1 { font-size: 1.25em; }
+.prose-container h2 { font-size: 1.125em; }
+.prose-container h3 { font-size: 1em; }
+
+.prose-container p {
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+}
+
+.prose-container p:first-child { margin-top: 0; }
+.prose-container p:last-child { margin-bottom: 0; }
+
+.prose-container ul,
+.prose-container ol {
+  padding-left: 1.5em;
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+}
+
+.prose-container ul { list-style-type: disc; }
+.prose-container ol { list-style-type: decimal; }
+
+.prose-container li {
+  margin-top: 0.25em;
+  margin-bottom: 0.25em;
+}
+
+.prose-container code:not(pre code) {
+  padding: 0.15em 0.35em;
+  border-radius: 0.25rem;
+  font-size: 0.875em;
+  background-color: var(--color-muted);
+  color: var(--color-foreground);
+}
+
+.prose-container blockquote {
+  padding-left: 1em;
+  margin-left: 0;
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+  border-left: 3px solid var(--color-border);
+  color: var(--color-muted-foreground);
+}
+
+.prose-container hr {
+  margin-top: 1em;
+  margin-bottom: 1em;
+  border: none;
+  border-top: 1px solid var(--color-border);
+}
+
+.prose-container table th,
+.prose-container table td {
+  padding: 0.375rem 0.75rem;
+  border: 1px solid var(--color-border);
+  text-align: left;
+}
+
+.prose-container table th {
+  font-weight: 600;
+  background-color: var(--color-muted);
+}
+
+.prose-container strong {
+  font-weight: 600;
+}
+
+/*
  * Light theme override: forces light values even when system prefers dark.
  * Applied via .light class on <html> by the ThemeToggle component.
  */

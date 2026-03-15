@@ -88,6 +88,16 @@ export function ExplorePageClient() {
           const data = JSON.parse(sseEvent.data);
 
           switch (sseEvent.event) {
+            case 'thinking':
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMsgId
+                    ? { ...m, thinking: (m.thinking ?? '') + (data.text ?? '') }
+                    : m,
+                ),
+              );
+              break;
+
             case 'text':
               setMessages((prev) =>
                 prev.map((m) =>
