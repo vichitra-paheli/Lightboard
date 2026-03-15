@@ -3,6 +3,7 @@ import { encryptCredentials } from '@lightboard/db/crypto';
 import { eq } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 import { withAuth } from '@/lib/auth';
+import { introspectSchema } from '@/lib/data-source-service';
 
 /** GET /api/data-sources — List all data sources for the current org. */
 export const GET = withAuth(async (_req, { db, orgId }) => {
@@ -40,13 +41,35 @@ export const POST = withAuth(async (req, { db, orgId }) => {
 
   const encrypted = encryptCredentials(masterKey, orgId, JSON.stringify(connection));
 
+  // Introspect schema on creation and cache it in config
+  let cachedSchema = null;
+  try {
+    const connConfig = {
+      host: connection.host ?? 'localhost',
+      port: parseInt(connection.port ?? '5432', 10),
+      database: connection.database ?? '',
+      user: connection.user ?? '',
+      password: connection.password ?? '',
+    };
+    cachedSchema = await introspectSchema(connConfig);
+  } catch {
+    // Schema introspection failed — save without cache, can be retried later
+  }
+
+  const config = {
+    host: connection.host,
+    port: connection.port,
+    database: connection.database,
+    ...(cachedSchema ? { cachedSchema } : {}),
+  };
+
   const [created] = await db
     .insert(dataSources)
     .values({
       orgId,
       name,
       type: type as 'postgres' | 'mysql' | 'clickhouse' | 'rest' | 'csv' | 'prometheus' | 'elasticsearch',
-      config: { host: connection.host, port: connection.port, database: connection.database },
+      config,
       credentials: encrypted,
     })
     .returning({

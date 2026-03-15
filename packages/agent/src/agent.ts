@@ -16,6 +16,7 @@ export interface AgentDataSource {
   id: string;
   name: string;
   type: string;
+  cachedSchema?: Record<string, unknown> | null;
 }
 
 /** Configuration for creating an Agent. */
@@ -59,9 +60,12 @@ export class Agent {
     this.conversation.addMessage({ role: 'user', content: userMessage });
 
     const systemPrompt = buildSystemPrompt({
-      dataSources: this.dataSources,
+      dataSources: this.dataSources as Parameters<typeof buildSystemPrompt>[0]['dataSources'],
       currentView,
     });
+
+    let consecutiveFailures = 0;
+    const MAX_CONSECUTIVE_FAILURES = 3;
 
     for (let round = 0; round < this.maxToolRounds; round++) {
       const toolCalls: ToolCallResult[] = [];
@@ -133,6 +137,7 @@ export class Agent {
 
       // Execute tool calls and feed results back
       const toolResults = [];
+      let allFailed = true;
       for (const tc of toolCalls) {
         const result = await this.toolRouter.execute(tc.name, tc.input);
         toolResults.push({
@@ -140,7 +145,16 @@ export class Agent {
           content: result.content,
           isError: result.isError,
         });
+        if (!result.isError) allFailed = false;
         yield { type: 'tool_end', name: tc.name, result: result.content, isError: result.isError };
+      }
+
+      // Circuit breaker: stop if tools keep failing
+      consecutiveFailures = allFailed ? consecutiveFailures + 1 : 0;
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+        yield { type: 'text', text: '\n\nI was unable to complete this request after multiple attempts. Please check your data source configuration and try again.' };
+        yield { type: 'done', stopReason: 'tool_failure' };
+        return;
       }
 
       // Add tool results as user message for next round
@@ -152,6 +166,13 @@ export class Agent {
     }
 
     yield { type: 'done', stopReason: 'max_tool_rounds' };
+  }
+
+  /** Load prior conversation history for multi-turn session persistence. */
+  loadHistory(messages: Message[]): void {
+    for (const msg of messages) {
+      this.conversation.addMessage(msg);
+    }
   }
 
   /** Reset the conversation history. */

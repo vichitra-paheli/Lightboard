@@ -58,7 +58,7 @@ export type AuthenticatedHandler = (
     orgId: string;
     db: Database;
   },
-) => Promise<NextResponse>;
+) => Promise<NextResponse | Response>;
 
 /**
  * Wraps an API route handler with auth validation and RLS context.
@@ -66,7 +66,7 @@ export type AuthenticatedHandler = (
  * and passes the org-scoped database to the handler.
  */
 export function withAuth(handler: AuthenticatedHandler) {
-  return async (req: NextRequest): Promise<NextResponse> => {
+  return async (req: NextRequest): Promise<NextResponse | Response> => {
     const token = getSessionToken(req);
     if (!token) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

@@ -23,6 +23,12 @@ importers:
       '@lightboard/agent':
         specifier: workspace:*
         version: link:../../packages/agent
+      '@lightboard/connector-postgres':
+        specifier: workspace:*
+        version: link:../../packages/connectors/postgres
+      '@lightboard/connector-sdk':
+        specifier: workspace:*
+        version: link:../../packages/connector-sdk
       '@lightboard/db':
         specifier: workspace:*
         version: link:../../packages/db

@@ -49,3 +49,4 @@ plugins/*.tar.gz
 # DuckDB temp files
 *.duckdb
 *.duckdb.wal
+Modelfile

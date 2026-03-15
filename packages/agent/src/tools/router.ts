@@ -7,6 +7,8 @@ export interface ToolContext {
   getSchema: (sourceId: string) => Promise<Record<string, unknown>>;
   /** Execute a query against a data source. */
   executeQuery: (sourceId: string, queryIR: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  /** Execute raw SQL against a data source (for complex joins). */
+  runSQL?: (sourceId: string, sql: string) => Promise<Record<string, unknown>>;
   /** Get the current view state. */
   getCurrentView?: () => Record<string, unknown> | null;
 }
@@ -42,6 +44,10 @@ const toolInputSchemas = {
     view_id: z.string().min(1),
     patch: z.record(z.unknown()),
   }),
+  run_sql: z.object({
+    source_id: z.string().min(1),
+    sql: z.string().min(1),
+  }),
 };
 
 /**
@@ -59,16 +65,29 @@ export class ToolRouter {
 
   /** Execute a tool call and return the result. Errors are returned, not thrown. */
   async execute(toolName: string, input: Record<string, unknown>): Promise<ToolExecutionResult> {
+    // Auto-parse stringified JSON values — local models often send nested objects as strings
+    const normalizedInput = this.normalizeInput(input);
+    // Debug: log normalization for troubleshooting local model issues
+    for (const [key, val] of Object.entries(input)) {
+      if (typeof val === 'string' && typeof normalizedInput[key] !== 'string') {
+        console.log(`[ToolRouter] Normalized "${key}" from string to ${typeof normalizedInput[key]}`);
+      }
+      if (typeof val === 'string' && typeof normalizedInput[key] === 'string' && val.includes('{')) {
+        console.log(`[ToolRouter] WARNING: "${key}" is still a string after normalization. First 100 chars: ${val.slice(0, 100)}`);
+      }
+    }
     try {
       switch (toolName) {
         case 'get_schema':
-          return await this.handleGetSchema(input);
+          return await this.handleGetSchema(normalizedInput);
         case 'execute_query':
-          return await this.handleExecuteQuery(input);
+          return await this.handleExecuteQuery(normalizedInput);
+        case 'run_sql':
+          return await this.handleRunSQL(normalizedInput);
         case 'create_view':
-          return await this.handleCreateView(input);
+          return await this.handleCreateView(normalizedInput);
         case 'modify_view':
-          return await this.handleModifyView(input);
+          return await this.handleModifyView(normalizedInput);
         default:
           return { content: `Unknown tool: ${toolName}`, isError: true };
       }
@@ -84,7 +103,10 @@ export class ToolRouter {
   private async handleGetSchema(input: Record<string, unknown>): Promise<ToolExecutionResult> {
     const parsed = toolInputSchemas.get_schema.safeParse(input);
     if (!parsed.success) {
-      return { content: `Invalid input: ${parsed.error.message}`, isError: true };
+      return {
+        content: `Invalid input for get_schema. Expected: {"source_id": "<data-source-id>"}. Got: ${JSON.stringify(input)}. Error: ${parsed.error.message}`,
+        isError: true,
+      };
     }
 
     const schema = await this.context.getSchema(parsed.data.source_id);
@@ -95,7 +117,10 @@ export class ToolRouter {
   private async handleExecuteQuery(input: Record<string, unknown>): Promise<ToolExecutionResult> {
     const parsed = toolInputSchemas.execute_query.safeParse(input);
     if (!parsed.success) {
-      return { content: `Invalid input: ${parsed.error.message}`, isError: true };
+      return {
+        content: `Invalid input for execute_query. Expected: {"source_id": "<id>", "query_ir": {"source": "<id>", "table": "<name>", ...}}. Got: ${JSON.stringify(input).slice(0, 200)}. Error: ${parsed.error.message}`,
+        isError: true,
+      };
     }
 
     const result = await this.context.executeQuery(parsed.data.source_id, parsed.data.query_ir);
@@ -140,8 +165,68 @@ export class ToolRouter {
     };
   }
 
+  /** Handle run_sql tool call — raw SQL for complex joins. */
+  private async handleRunSQL(input: Record<string, unknown>): Promise<ToolExecutionResult> {
+    const parsed = toolInputSchemas.run_sql.safeParse(input);
+    if (!parsed.success) {
+      return { content: `Invalid input for run_sql: ${parsed.error.message}`, isError: true };
+    }
+
+    if (!this.context.runSQL) {
+      return { content: 'run_sql is not available', isError: true };
+    }
+
+    const result = await this.context.runSQL(parsed.data.source_id, parsed.data.sql);
+    return { content: JSON.stringify(result, null, 2), isError: false };
+  }
+
   /** Get a stored view by ID (for testing). */
   getView(viewId: string): Record<string, unknown> | undefined {
     return this.viewStore.get(viewId);
+  }
+
+  /**
+   * Normalizes tool input by auto-parsing stringified JSON values.
+   * Local LLMs often send nested objects as JSON strings rather than parsed objects.
+   * Handles double-escaped strings (string of a string of JSON).
+   */
+  private normalizeInput(input: Record<string, unknown>): Record<string, unknown> {
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(input)) {
+      if (typeof value === 'string') {
+        result[key] = this.tryParseJSON(value);
+      } else {
+        result[key] = value;
+      }
+    }
+    return result;
+  }
+
+  /** Attempts to parse a string as JSON, handling double-escaping. */
+  private tryParseJSON(value: string): unknown {
+    let current = value.trim();
+    // Try up to 2 levels of unescaping (double-encoded strings)
+    for (let i = 0; i < 2; i++) {
+      if ((current.startsWith('{') && current.endsWith('}')) ||
+          (current.startsWith('[') && current.endsWith(']'))) {
+        try {
+          return JSON.parse(current);
+        } catch {
+          return value; // Not valid JSON
+        }
+      }
+      // Try unquoting — model may send '"{ ... }"' (quoted JSON string)
+      if (current.startsWith('"') && current.endsWith('"')) {
+        try {
+          current = JSON.parse(current) as string;
+          if (typeof current !== 'string') return current; // Already parsed to object
+        } catch {
+          return value;
+        }
+      } else {
+        break;
+      }
+    }
+    return value;
   }
 }

@@ -12,6 +12,8 @@
     "paths": {
       "@/*": ["./src/*"],
       "@lightboard/agent": ["../../packages/agent/src"],
+      "@lightboard/connector-postgres": ["../../packages/connectors/postgres/src"],
+      "@lightboard/connector-sdk": ["../../packages/connector-sdk/src"],
       "@lightboard/db": ["../../packages/db/src"],
       "@lightboard/db/*": ["../../packages/db/src/*"],
       "@lightboard/query-ir": ["../../packages/query-ir/src"],

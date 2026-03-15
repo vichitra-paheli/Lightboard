@@ -53,6 +53,27 @@ export const agentTools: ToolDefinition[] = [
     },
   },
   {
+    name: 'run_sql',
+    description:
+      'Execute a read-only SELECT SQL query directly against a data source. ' +
+      'Use this for complex queries involving JOINs that are hard to express in QueryIR. ' +
+      'Only SELECT queries are allowed. Results are limited to 1000 rows.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        source_id: {
+          type: 'string',
+          description: 'The data source to query',
+        },
+        sql: {
+          type: 'string',
+          description: 'A read-only SELECT SQL query',
+        },
+      },
+      required: ['source_id', 'sql'],
+    },
+  },
+  {
     name: 'create_view',
     description:
       'Create an interactive visualization view from query results. ' +
