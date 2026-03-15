@@ -129,14 +129,15 @@ Core tools: `list_data_sources`, `get_schema`, `execute_query`, `create_view`, `
 
 ```bash
 # Local dev
-docker compose up                    # Start full stack (app + Postgres + Redis + seed data)
-pnpm dev                             # Start Next.js dev server
+docker compose up -d                 # Start Postgres + Redis
+pnpm dev                             # Start Next.js dev server (Turbopack)
 pnpm test                            # Run all unit + component tests
-pnpm test:e2e                        # Run Playwright E2E tests against Docker stack
-pnpm lint                            # ESLint + Prettier + tsc --noEmit
+pnpm typecheck                       # TypeScript across all packages
+pnpm --filter @lightboard/web lint   # ESLint (catches unused imports, any types)
 pnpm build                           # Production build
 
 # Per-package
+pnpm --filter @lightboard/agent test -- --run   # Agent tests (82 tests)
 pnpm --filter @lightboard/query-ir test
 pnpm --filter @lightboard/viz-core storybook
 

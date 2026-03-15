@@ -222,15 +222,15 @@ Week 4:  D-1.5.5 (API route wiring)
 
 ## Exit criteria
 
-- [ ] Leader agent delegates to query, view, and insights specialists
-- [ ] Each sub-agent has focused context under 2K tokens
+- [x] Leader agent delegates to query, view, and insights specialists
+- [x] Each sub-agent has focused context under 2K tokens
 - [ ] Multi-step analysis works: query -> save scratchpad -> query scratchpad -> visualize
-- [ ] Chat messages render markdown (tables, code blocks, lists)
-- [ ] Thinking state shows collapsible reasoning
-- [ ] Tool calls expand to show input/output details
-- [ ] Agent delegation indicators show which specialist is active
-- [ ] Backward compat: `multiAgent: false` uses existing single-agent loop
-- [ ] All existing Phase 1 tests continue to pass
+- [x] Chat messages render markdown (tables, code blocks, lists)
+- [x] Thinking state shows collapsible reasoning
+- [x] Tool calls expand to show input/output details
+- [x] Agent delegation indicators show which specialist is active
+- [x] Backward compat: `multiAgent: false` uses existing single-agent loop
+- [x] All existing Phase 1 tests continue to pass (82 tests)
 - [ ] E2E tests verify full multi-agent flow
 
 ## Risk register
