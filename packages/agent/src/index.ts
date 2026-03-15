@@ -1,12 +1,13 @@
 export { Agent, type AgentConfig, type AgentDataSource, type AgentEvent } from './agent';
 export {
   QueryAgent,
-  type QueryAgentConfig,
-  type AgentTask,
+  ViewAgent,
+  InsightsAgent,
   type SubAgent,
-  type SubAgentResult,
+  type SubAgentConfig,
   type SubAgentRole,
-  type ToolCallRecord,
+  type AgentTask,
+  type SubAgentResult,
 } from './agents';
 export { ConversationManager } from './conversation';
 export {
@@ -20,5 +21,13 @@ export {
   type StreamEvent,
   type ToolDefinition,
 } from './provider';
-export { buildSystemPrompt, buildQueryPrompt } from './prompt';
-export { agentTools, queryTools, viewTools, ToolRouter, type ToolContext, type ToolExecutionResult } from './tools';
+export { buildSystemPrompt, buildQueryPrompt, buildViewPrompt, buildInsightsPrompt } from './prompt';
+export {
+  agentTools,
+  queryTools,
+  viewTools,
+  insightsTools,
+  ToolRouter,
+  type ToolContext,
+  type ToolExecutionResult,
+} from './tools';

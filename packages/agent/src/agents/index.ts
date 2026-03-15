@@ -1,8 +1,10 @@
-export { QueryAgent, type QueryAgentConfig } from './query-agent';
+export { QueryAgent } from './query-agent';
+export { ViewAgent } from './view-agent';
+export { InsightsAgent } from './insights-agent';
 export type {
-  AgentTask,
   SubAgent,
-  SubAgentResult,
+  SubAgentConfig,
   SubAgentRole,
-  ToolCallRecord,
+  AgentTask,
+  SubAgentResult,
 } from './types';

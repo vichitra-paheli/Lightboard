@@ -12,6 +12,8 @@ export interface ToolContext {
   runSQL?: (sourceId: string, sql: string) => Promise<Record<string, unknown>>;
   /** Get the current view state. */
   getCurrentView?: () => Record<string, unknown> | null;
+  /** Execute DuckDB SQL on the session scratchpad for statistical analysis. */
+  analyzeData?: (sql: string) => Promise<Record<string, unknown>>;
 }
 
 /** Result of a tool execution. */
@@ -48,6 +50,10 @@ const toolInputSchemas = {
   run_sql: z.object({
     source_id: z.string().min(1),
     sql: z.string().min(1),
+  }),
+  analyze_data: z.object({
+    sql: z.string().min(1),
+    description: z.string().optional(),
   }),
 };
 
@@ -97,6 +103,8 @@ export class ToolRouter {
           return await this.handleCreateView(normalizedInput);
         case 'modify_view':
           return await this.handleModifyView(normalizedInput);
+        case 'analyze_data':
+          return await this.handleAnalyzeData(normalizedInput);
         default:
           return { content: `Unknown tool: ${toolName}`, isError: true };
       }
@@ -186,6 +194,21 @@ export class ToolRouter {
     }
 
     const result = await this.context.runSQL(parsed.data.source_id, parsed.data.sql);
+    return { content: JSON.stringify(result, null, 2), isError: false };
+  }
+
+  /** Handle analyze_data tool call — DuckDB analytics on the scratchpad. */
+  private async handleAnalyzeData(input: Record<string, unknown>): Promise<ToolExecutionResult> {
+    const parsed = toolInputSchemas.analyze_data.safeParse(input);
+    if (!parsed.success) {
+      return { content: `Invalid input for analyze_data: ${parsed.error.message}`, isError: true };
+    }
+
+    if (!this.context.analyzeData) {
+      return { content: 'analyze_data is not available — no scratchpad configured', isError: true };
+    }
+
+    const result = await this.context.analyzeData(parsed.data.sql);
     return { content: JSON.stringify(result, null, 2), isError: false };
   }
 

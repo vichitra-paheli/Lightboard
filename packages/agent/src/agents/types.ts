@@ -1,78 +1,62 @@
-import type { AgentEvent } from '../agent';
+import type { LLMProvider, ToolDefinition } from '../provider/types';
+import type { ToolRouter } from '../tools/router';
 
-/**
- * Roles a sub-agent can fulfill in the multi-agent orchestration.
- * Each role has a focused context window and tool set.
- */
+/** Roles that sub-agents can take in the multi-agent orchestration. */
 export type SubAgentRole = 'query' | 'view' | 'insights';
 
 /**
- * Contract that every sub-agent must implement.
- * Sub-agents are headless — they run their own LLM conversation internally
- * and return structured results. Only the leader streams text to the user.
- */
-export interface SubAgent {
-  /** Unique identifier for this agent instance. */
-  readonly id: string;
-  /** The specialist role this agent fulfills. */
-  readonly role: SubAgentRole;
-  /**
-   * Execute a task and yield AgentEvents as the sub-agent works.
-   * The leader collects tool_start/tool_end events for transparency
-   * but does NOT forward text events to the user.
-   */
-  chat(task: AgentTask): AsyncGenerator<AgentEvent>;
-}
-
-/**
- * Task handed from the leader agent to a sub-agent.
+ * A task assigned by the leader to a sub-agent.
  * Contains the instruction and role-specific context payload.
  */
 export interface AgentTask {
-  /** Natural language instruction describing what the sub-agent should do. */
+  /** Unique task identifier. */
+  id: string;
+  /** Natural language instruction from the leader. */
   instruction: string;
-  /** Role-specific context payload (e.g., schema for query agent, data summary for view agent). */
+  /** Role-specific context (e.g., schema for query agent, data summary for view agent). */
   context: Record<string, unknown>;
-  /** Conversation ID for tracing and scratchpad association. */
-  conversationId: string;
-  /** Parent span ID for distributed tracing. */
-  parentSpanId?: string;
-}
-
-/**
- * Record of a single tool call made by a sub-agent.
- * Used for transparency logging in the leader's response.
- */
-export interface ToolCallRecord {
-  /** Tool name that was called. */
-  name: string;
-  /** Input passed to the tool. */
-  input: Record<string, unknown>;
-  /** Result returned by the tool. */
-  result: string;
-  /** Whether the tool call errored. */
-  isError: boolean;
-  /** Duration of the tool call in milliseconds. */
-  durationMs: number;
 }
 
 /**
  * Structured result returned by a sub-agent to the leader.
- * Contains the role-specific output data, tool call log, and token usage.
+ * Contains the role-specific output data and human-readable explanation.
  */
 export interface SubAgentResult {
-  /** ID of the sub-agent that produced this result. */
-  agentId: string;
-  /** Role of the sub-agent. */
+  /** The role of the agent that produced this result. */
   role: SubAgentRole;
-  /** Whether the sub-agent completed its task successfully. */
+  /** Whether the task succeeded. */
   success: boolean;
-  /** Role-specific output data (e.g., query results, ViewSpec, insights). */
+  /** The structured output (ViewSpec, query result, analysis). */
   data: Record<string, unknown>;
-  /** Log of all tool calls made during execution. */
-  toolCalls: ToolCallRecord[];
-  /** Token usage for the sub-agent's LLM calls. */
-  tokenUsage: { input: number; output: number };
-  /** Error message if the sub-agent failed. */
+  /** Human-readable explanation of what was done. */
+  explanation: string;
+  /** Error message if success is false. */
   error?: string;
+}
+
+/**
+ * Contract that all sub-agents implement.
+ * Sub-agents are headless specialists that receive tasks from the leader
+ * and return structured results. They do NOT stream to the user.
+ */
+export interface SubAgent {
+  /** The role this agent specializes in. */
+  readonly role: SubAgentRole;
+  /** Tool definitions this agent has access to. */
+  readonly tools: ToolDefinition[];
+  /** Execute a task and yield structured results. */
+  execute(task: AgentTask): AsyncIterable<SubAgentResult>;
+}
+
+/**
+ * Configuration for creating a sub-agent.
+ * Shared across all specialist agent types.
+ */
+export interface SubAgentConfig {
+  /** LLM provider for the sub-agent's own conversation. */
+  provider: LLMProvider;
+  /** Tool router for executing tool calls (scoped to allowed tools). */
+  toolRouter: ToolRouter;
+  /** Maximum tool call rounds before giving up (default varies by agent). */
+  maxToolRounds?: number;
 }
