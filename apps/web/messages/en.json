@@ -63,7 +63,25 @@
     "createFirst": "Open Explore to create your first view."
   },
   "settings": {
-    "title": "Settings"
+    "title": "Settings",
+    "ai": {
+      "title": "AI Model Configuration",
+      "description": "Configure the AI model used for data exploration.",
+      "providerType": "Provider",
+      "providerClaude": "Claude (Anthropic)",
+      "providerOpenAI": "OpenAI-Compatible",
+      "apiKey": "API Key",
+      "apiKeyPlaceholder": "Enter your API key",
+      "baseUrl": "Base URL",
+      "baseUrlPlaceholder": "https://your-endpoint.com/v1",
+      "model": "Model Name",
+      "modelPlaceholder": "e.g. gpt-4o, claude-sonnet-4-20250514",
+      "save": "Save",
+      "saving": "Saving...",
+      "saved": "AI model configuration saved.",
+      "error": "Failed to save configuration.",
+      "noConfig": "No AI model configured. The agent will use the server default if available."
+    }
   },
   "auth": {
     "login": "Log in",
