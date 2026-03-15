@@ -63,6 +63,9 @@ export class OpenAICompatibleProvider implements LLMProvider {
       body.temperature = options.temperature;
     }
 
+    console.log(`[OpenAICompatibleProvider] Request: model=${body.model}, messages=${(body.messages as unknown[]).length}, tools=${openaiTools?.length ?? 0}`);
+    console.log(`[OpenAICompatibleProvider] Messages:`, JSON.stringify(body.messages, null, 2).slice(0, 500));
+
     const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
       method: 'POST',
       headers: {
