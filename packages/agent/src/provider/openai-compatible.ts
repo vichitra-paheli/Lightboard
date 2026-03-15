@@ -83,6 +83,9 @@ export class OpenAICompatibleProvider implements LLMProvider {
     const decoder = new TextDecoder();
     let buffer = '';
 
+    // Track tool call state to emit tool_call_end with parsed arguments
+    const toolCallArgs = new Map<string, { name: string; args: string }>();
+
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -95,35 +98,71 @@ export class OpenAICompatibleProvider implements LLMProvider {
         if (!line.startsWith('data: ')) continue;
         const data = line.slice(6).trim();
         if (data === '[DONE]') {
+          // Emit tool_call_end for any pending tool calls before closing
+          for (const [id, tc] of toolCallArgs) {
+            try {
+              const parsed = JSON.parse(tc.args);
+              yield { type: 'tool_call_end' as const, id, name: tc.name, input: parsed };
+            } catch {
+              yield { type: 'tool_call_end' as const, id, name: tc.name, input: {} };
+            }
+          }
           yield { type: 'message_end', stopReason: 'end_turn' };
           return;
         }
 
         try {
           const parsed = JSON.parse(data);
-          const delta = parsed.choices?.[0]?.delta;
-          if (!delta) continue;
+          const choice = parsed.choices?.[0];
+          const delta = choice?.delta;
+          const finishReason = choice?.finish_reason;
 
-          if (delta.content) {
+          if (delta?.content) {
             yield { type: 'text_delta', text: delta.content };
           }
 
-          if (delta.tool_calls) {
+          if (delta?.tool_calls) {
             for (const tc of delta.tool_calls) {
+              const callId = tc.id ?? `call_${tc.index}`;
               if (tc.function?.name) {
+                toolCallArgs.set(callId, { name: tc.function.name, args: '' });
                 yield {
                   type: 'tool_call_start',
-                  id: tc.id ?? `call_${tc.index}`,
+                  id: callId,
                   name: tc.function.name,
                 };
               }
               if (tc.function?.arguments) {
+                const existing = toolCallArgs.get(callId);
+                if (existing) {
+                  existing.args += tc.function.arguments;
+                }
                 yield {
                   type: 'tool_call_delta',
-                  id: tc.id ?? `call_${tc.index}`,
+                  id: callId,
                   input: tc.function.arguments,
                 };
               }
+            }
+          }
+
+          // When finish_reason indicates tool calls are complete, emit tool_call_end events
+          if (finishReason === 'tool_calls' || finishReason === 'stop') {
+            for (const [id, tc] of toolCallArgs) {
+              try {
+                const parsedArgs = JSON.parse(tc.args);
+                yield { type: 'tool_call_end' as const, id, name: tc.name, input: parsedArgs };
+              } catch {
+                yield { type: 'tool_call_end' as const, id, name: tc.name, input: {} };
+              }
+            }
+            if (finishReason === 'tool_calls') {
+              yield { type: 'message_end', stopReason: 'tool_use' };
+              return;
+            }
+            if (finishReason === 'stop') {
+              yield { type: 'message_end', stopReason: 'end_turn' };
+              return;
             }
           }
         } catch {
@@ -132,6 +171,15 @@ export class OpenAICompatibleProvider implements LLMProvider {
       }
     }
 
+    // Emit any remaining tool calls if stream ended without finish_reason
+    for (const [id, tc] of toolCallArgs) {
+      try {
+        const parsed = JSON.parse(tc.args);
+        yield { type: 'tool_call_end' as const, id, name: tc.name, input: parsed };
+      } catch {
+        yield { type: 'tool_call_end' as const, id, name: tc.name, input: {} };
+      }
+    }
     yield { type: 'message_end', stopReason: 'end_turn' };
   }
 
