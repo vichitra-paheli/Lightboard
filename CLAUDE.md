@@ -15,7 +15,7 @@ lightboard/
 │   ├── query-ir/          # Query intermediate representation (the lingua franca)
 │   ├── compute/           # DuckDB (native + WASM) + Arrow pipeline
 │   ├── viz-core/          # visx chart components + panel adapter protocol
-│   ├── agent/             # AI agent (Claude API) + tool definitions
+│   ├── agent/             # Multi-agent orchestration (leader + query/view/insights agents + scratchpad)
 │   ├── ui/                # shadcn/ui components (copied, not installed)
 │   ├── telemetry/         # OpenTelemetry SDK + built-in data source
 │   ├── mcp-server/        # MCP server for programmatic UI operations
@@ -35,6 +35,30 @@ lightboard/
 **PanelPlugin** — The adapter interface for visualization components. Any React component becomes a Lightboard panel by exporting: `id`, `configSchema` (JSON Schema), `dataShape`, and `Component` (React.FC). The host injects data, config, dimensions, and theme.
 
 **Connector** — The adapter interface for data sources. Methods: `connect`, `introspect`, `query`, `stream`, `healthCheck`, `capabilities`. Each connector is an npm package or local tarball.
+
+## Multi-agent architecture (Phase 1.5)
+
+The agent package (`packages/agent/`) uses a multi-agent orchestration pattern:
+
+```
+packages/agent/src/
+├── agent.ts                    # Agent class (multiAgent flag switches to LeaderAgent)
+├── agents/
+│   ├── types.ts                # SubAgent, AgentTask, SubAgentResult interfaces
+│   ├── leader.ts               # LeaderAgent — orchestrates conversation + delegates
+│   ├── query-agent.ts          # Query specialist (schema, QueryIR, SQL)
+│   ├── view-agent.ts           # View specialist (chart selection, ViewSpec)
+│   └── insights-agent.ts       # Insights specialist (stats via DuckDB)
+├── scratchpad/
+│   ├── scratchpad.ts           # SessionScratchpad — per-session DuckDB for intermediate data
+│   └── manager.ts              # ScratchpadManager — session lifecycle + cleanup
+├── prompt/                     # Per-agent system prompts (focused context)
+├── tools/                      # Per-agent tool definitions + router
+├── conversation/               # ConversationManager (used by leader only)
+└── provider/                   # LLM providers (Claude, OpenAI-compatible)
+```
+
+**Leader** calls sub-agents as tools (`delegate_query`, `delegate_view`, `delegate_insights`). Sub-agents are headless — they return structured `SubAgentResult`, only the leader streams to the user. The session scratchpad allows agents to save intermediate query results as named DuckDB tables for multi-step analysis.
 
 ## Tech stack — no substitutions without PR justification
 
@@ -96,10 +120,10 @@ Core tools: `list_data_sources`, `get_schema`, `execute_query`, `create_view`, `
 
 ## Project docs (read in order for full context)
 
-1. `00-project-overview.md` — Architecture, tech stack, repo structure, key concepts
-2. `01-phase-1.md` — Phase 1 plan: foundation (weeks 1-6), all code standards, deliverables with schemas
-3. `02-phase-2.md` — Phase 2 plan: persistence + sharing (weeks 7-12), variable system, layouts, RBAC
-4. `lightboard-project-doc.docx` — Full project document with all phases, risk register, tech stack table
+1. `documentation/project_overview.md` — Architecture, tech stack, repo structure, key concepts
+2. `documentation/phase_1.md` — Phase 1 plan: foundation (weeks 1-6), all code standards, deliverables with schemas
+3. `documentation/phase_1.5.md` — Phase 1.5 plan: multi-agent architecture, scratchpad, UI overhaul
+4. `documentation/phase_2.md` — Phase 2 plan: persistence + sharing (weeks 7-12), variable system, layouts, RBAC
 
 ## Commands
 

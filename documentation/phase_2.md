@@ -3,8 +3,10 @@
 **Duration**: Weeks 7–12  
 **Goal**: Users can save views, build multi-panel layouts with template variables, share with teammates, and use the visual query builder as a non-AI alternative.
 
-**Prerequisites**: All Phase 1 exit criteria must be met.  
-**Team**: Same 4–5 engineers, roles may shift based on Phase 1 learnings.
+**Prerequisites**: All Phase 1 and Phase 1.5 exit criteria must be met. The multi-agent architecture, session scratchpad, and UI overhaul (markdown, thinking state, tool call details) from Phase 1.5 are required foundations.
+**Team**: Same 4–5 engineers, roles may shift based on Phase 1/1.5 learnings.
+
+> **Note**: D18 (Agent improvements) from the original Phase 2 plan is superseded by Phase 1.5's multi-agent architecture. The multi-agent system already covers: view modification via sub-agents, multi-step exploration via scratchpad, error recovery via circuit breakers, and explanation via thinking state UI.
 
 ---
 
