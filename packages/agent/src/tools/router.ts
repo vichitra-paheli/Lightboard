@@ -1,5 +1,6 @@
-import { queryIRSchema } from '@lightboard/query-ir';
 import { z } from 'zod';
+
+import type { ToolDefinition } from '../provider/types';
 
 /** Context provided to tool handlers for accessing services. */
 export interface ToolContext {
@@ -52,19 +53,27 @@ const toolInputSchemas = {
 
 /**
  * Routes tool calls from the LLM to the appropriate handler.
- * Each handler validates inputs, delegates to services, and returns
- * structured results (or errors for agent self-correction).
+ * Accepts a dynamic set of tool definitions at construction time,
+ * allowing different agents to use different tool subsets.
  */
 export class ToolRouter {
   private context: ToolContext;
   private viewStore = new Map<string, Record<string, unknown>>();
+  private allowedTools: Set<string>;
 
-  constructor(context: ToolContext) {
+  constructor(context: ToolContext, toolDefinitions?: ToolDefinition[]) {
     this.context = context;
+    this.allowedTools = toolDefinitions
+      ? new Set(toolDefinitions.map((t) => t.name))
+      : new Set(['get_schema', 'execute_query', 'run_sql', 'create_view', 'modify_view']);
   }
 
   /** Execute a tool call and return the result. Errors are returned, not thrown. */
   async execute(toolName: string, input: Record<string, unknown>): Promise<ToolExecutionResult> {
+    if (!this.allowedTools.has(toolName)) {
+      return { content: `Tool "${toolName}" is not available for this agent`, isError: true };
+    }
+
     // Auto-parse stringified JSON values — local models often send nested objects as strings
     const normalizedInput = this.normalizeInput(input);
     // Debug: log normalization for troubleshooting local model issues

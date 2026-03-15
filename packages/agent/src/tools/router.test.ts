@@ -94,7 +94,7 @@ describe('ToolRouter', () => {
 
     const result = await router.execute('unknown_tool', {});
     expect(result.isError).toBe(true);
-    expect(result.content).toContain('Unknown tool');
+    expect(result.content).toContain('not available');
   });
 
   it('returns error for invalid get_schema input', async () => {
