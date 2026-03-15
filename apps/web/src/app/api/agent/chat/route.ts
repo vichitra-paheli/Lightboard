@@ -12,7 +12,8 @@ import { redis } from '@/lib/redis';
 import { dataSources } from '@lightboard/db/schema';
 import { eq } from 'drizzle-orm';
 import {
-  Agent,
+  LeaderAgent,
+  ScratchpadManager,
   LLMError,
   type AgentDataSource,
   type AgentEvent,
@@ -20,6 +21,15 @@ import {
   type ToolContext,
 } from '@lightboard/agent';
 import { resolveAIProvider } from '@/lib/ai-provider';
+
+/**
+ * Singleton ScratchpadManager for session scratchpad lifecycle.
+ * Shared across all requests — each conversation gets its own scratchpad.
+ */
+const scratchpadManager = new ScratchpadManager({
+  cleanupIntervalMs: 5 * 60 * 1000,
+  maxSessionAgeMs: 60 * 60 * 1000,
+});
 
 /** Maximum duration for agent processing in milliseconds. */
 const AGENT_TIMEOUT_MS = 300_000;
@@ -45,9 +55,8 @@ export const POST = withAuth(async (req, { db, orgId }) => {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  const { message, sourceId, conversationId } = body as {
+  const { message, conversationId } = body as {
     message?: string;
-    sourceId?: string;
     conversationId?: string;
   };
 
@@ -128,18 +137,22 @@ export const POST = withAuth(async (req, { db, orgId }) => {
     },
   };
 
-  // Instantiate agent with resolved provider
-  const agent = new Agent({
+  // Generate or reuse conversation/session ID
+  const sessionId = conversationId ?? `conv_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
+
+  // Instantiate the multi-agent LeaderAgent (delegates to query/view/insights specialists)
+  const leader = new LeaderAgent({
     provider,
     toolContext,
     dataSources: agentDataSources,
+    scratchpadManager,
   });
 
   // Load conversation history from Redis if conversationId provided
   if (conversationId) {
     const stored = await loadConversation(orgId, conversationId);
     if (stored) {
-      agent.loadHistory(stored);
+      leader.loadHistory(stored);
     }
   }
 
@@ -148,28 +161,24 @@ export const POST = withAuth(async (req, { db, orgId }) => {
   const wantsStream = acceptHeader.includes('text/event-stream');
 
   if (wantsStream) {
-    return handleStreaming(agent, message, orgId, conversationId, sourceId);
+    return handleStreaming(leader, message, orgId, sessionId);
   }
 
-  return handleNonStreaming(agent, message, orgId, conversationId, sourceId);
+  return handleNonStreaming(leader, message, orgId, sessionId);
 });
 
 /**
  * Handles non-streaming agent chat — collects all events and returns a single JSON response.
  */
 async function handleNonStreaming(
-  agent: Agent,
+  leader: LeaderAgent,
   message: string,
   orgId: string,
-  conversationId: string | undefined,
-  _sourceId: string | undefined,
+  sessionId: string,
 ): Promise<NextResponse> {
-  // Generate or reuse conversation ID
-  const sessionId = conversationId ?? `conv_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
-
   try {
     // Process with timeout
-    const events = await collectWithTimeout(agent.chat(message), AGENT_TIMEOUT_MS);
+    const events = await collectWithTimeout(leader.chat(message, sessionId), AGENT_TIMEOUT_MS);
 
     // Extract results
     let text = '';
@@ -209,7 +218,7 @@ async function handleNonStreaming(
     }
 
     // Save conversation to Redis
-    const updatedHistory = agent.getHistory();
+    const updatedHistory = leader.getHistory();
     await saveConversation(orgId, sessionId, updatedHistory);
 
     return NextResponse.json({
@@ -270,13 +279,11 @@ async function handleNonStreaming(
  * Handles SSE streaming — emits events as they arrive from the agent.
  */
 function handleStreaming(
-  agent: Agent,
+  leader: LeaderAgent,
   message: string,
   orgId: string,
-  conversationId: string | undefined,
-  _sourceId: string | undefined,
+  sessionId: string,
 ): Response {
-  const sessionId = conversationId ?? `conv_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
@@ -300,7 +307,7 @@ function handleStreaming(
         });
 
         const processStream = async () => {
-          for await (const event of agent.chat(message)) {
+          for await (const event of leader.chat(message, sessionId)) {
             switch (event.type) {
               case 'text':
                 enqueue('text', { text: event.text });
@@ -326,13 +333,23 @@ function handleStreaming(
                 }
                 break;
               }
-              case 'done':
+              case 'agent_start':
+                enqueue('agent_start', { agent: event.agent, task: event.task });
+                break;
+              case 'agent_end':
+                enqueue('agent_end', { agent: event.agent, summary: event.summary });
+                break;
+              case 'thinking':
+                enqueue('thinking', { text: event.text });
+                break;
+              case 'done': {
                 // Save conversation before closing
-                const history = agent.getHistory();
+                const history = leader.getHistory();
                 await saveConversation(orgId, sessionId, history);
 
                 enqueue('done', { stopReason: event.stopReason, conversationId: sessionId });
                 break;
+              }
             }
           }
         };
