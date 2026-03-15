@@ -48,14 +48,20 @@ export class OpenAICompatibleProvider implements LLMProvider {
         }))
       : undefined;
 
-    const body = {
+    const body: Record<string, unknown> = {
       model: options?.model ?? this.defaultModel,
       messages: openaiMessages,
-      tools: openaiTools,
-      max_tokens: options?.maxTokens ?? this.defaultMaxTokens,
-      temperature: options?.temperature,
       stream: true,
+      max_tokens: options?.maxTokens ?? this.defaultMaxTokens,
     };
+    // Only include tools if there are any — some APIs reject empty/null tools arrays
+    if (openaiTools && openaiTools.length > 0) {
+      body.tools = openaiTools;
+    }
+    // Only include temperature if explicitly set — avoid sending undefined
+    if (options?.temperature !== undefined) {
+      body.temperature = options.temperature;
+    }
 
     const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
       method: 'POST',
@@ -67,8 +73,14 @@ export class OpenAICompatibleProvider implements LLMProvider {
     });
 
     if (!response.ok) {
+      let errorDetail = '';
+      try {
+        const errorBody = await response.text();
+        errorDetail = errorBody.slice(0, 500);
+        console.error(`[OpenAICompatibleProvider] ${response.status} error:`, errorDetail);
+      } catch { /* ignore */ }
       throw new LLMError(
-        `OpenAI-compatible API error: ${response.status} ${response.statusText}`,
+        `OpenAI-compatible API error: ${response.status} ${response.statusText}${errorDetail ? ` — ${errorDetail}` : ''}`,
         'openai-compatible',
         response.status,
         response.status === 429 || response.status >= 500,
