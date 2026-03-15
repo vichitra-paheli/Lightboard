@@ -1,44 +1,38 @@
 import type { Message, ToolCallResult } from '../provider/types';
-import { buildQueryPrompt } from '../prompt/query-prompt';
-import { queryTools } from '../tools/query-tools';
+import { buildInsightsPrompt } from '../prompt/insights-prompt';
+import { insightsTools } from '../tools/insights-tools';
 import type { AgentTask, SubAgent, SubAgentConfig, SubAgentResult } from './types';
 
 /**
- * Query specialist sub-agent.
- * Handles schema exploration and data retrieval via get_schema, execute_query, and run_sql.
- * Receives full schema in task context. Does NOT create views — that is the ViewAgent's job.
+ * Insights specialist sub-agent.
+ * Handles statistical analysis via DuckDB analytics on the session scratchpad.
+ * Has access to the analyze_data tool only.
+ * Receives data summary and user question in task context.
  */
-export class QueryAgent implements SubAgent {
-  readonly role = 'query' as const;
-  readonly tools = queryTools;
+export class InsightsAgent implements SubAgent {
+  readonly role = 'insights' as const;
+  readonly tools = insightsTools;
   private config: SubAgentConfig;
 
   constructor(config: SubAgentConfig) {
     this.config = config;
   }
 
-  /** Execute a query task and yield the result. */
+  /** Execute an insights task and yield the result. */
   async *execute(task: AgentTask): AsyncIterable<SubAgentResult> {
     const result = await this.run(task);
     yield result;
   }
 
-  /** Run a query task and return the structured result. */
+  /** Run an insights task and return the structured result. */
   async run(task: AgentTask): Promise<SubAgentResult> {
-    const dataSources = (task.context.dataSources ?? []) as Array<{
-      id: string;
-      name: string;
-      type: string;
-      cachedSchema?: { tables: { name: string; schema: string; columns: { name: string; type: string; nullable: boolean; primaryKey: boolean }[] }[] } | null;
-    }>;
-
-    const systemPrompt = buildQueryPrompt({ dataSources });
+    const systemPrompt = buildInsightsPrompt(task.context);
     const messages: Message[] = [
       { role: 'user', content: task.instruction },
     ];
 
     const maxRounds = this.config.maxToolRounds ?? 5;
-    let lastQueryResult: Record<string, unknown> | undefined;
+    let lastAnalysisResult: Record<string, unknown> | undefined;
 
     for (let round = 0; round < maxRounds; round++) {
       const toolCalls: ToolCallResult[] = [];
@@ -46,9 +40,11 @@ export class QueryAgent implements SubAgent {
       let textContent = '';
       let hasToolCalls = false;
 
-      const stream = this.config.provider.chat(messages, this.tools, {
-        system: systemPrompt,
-      });
+      const stream = this.config.provider.chat(
+        messages,
+        this.tools,
+        { system: systemPrompt },
+      );
 
       for await (const event of stream) {
         switch (event.type) {
@@ -90,10 +86,11 @@ export class QueryAgent implements SubAgent {
       });
 
       if (!hasToolCalls) {
+        // Agent finished with a text response containing its analysis
         return {
-          role: 'query',
+          role: 'insights',
           success: true,
-          data: lastQueryResult ?? { text: textContent },
+          data: lastAnalysisResult ?? this.extractInsightsData(textContent),
           explanation: textContent,
         };
       }
@@ -108,11 +105,12 @@ export class QueryAgent implements SubAgent {
           isError: result.isError,
         });
 
-        if (!result.isError) {
+        // Capture analysis results
+        if (!result.isError && tc.name === 'analyze_data') {
           try {
-            lastQueryResult = JSON.parse(result.content) as Record<string, unknown>;
+            lastAnalysisResult = JSON.parse(result.content) as Record<string, unknown>;
           } catch {
-            lastQueryResult = { raw: result.content };
+            lastAnalysisResult = { rawResult: result.content };
           }
         }
       }
@@ -125,11 +123,24 @@ export class QueryAgent implements SubAgent {
     }
 
     return {
-      role: 'query',
+      role: 'insights',
       success: false,
-      data: lastQueryResult ?? {},
+      data: lastAnalysisResult ?? {},
       explanation: 'Exceeded maximum tool rounds',
       error: 'max_tool_rounds',
     };
+  }
+
+  /** Extract structured insights data from the agent's text response. */
+  private extractInsightsData(text: string): Record<string, unknown> {
+    const jsonMatch = text.match(/```json\s*([\s\S]*?)```/);
+    if (jsonMatch?.[1]) {
+      try {
+        return JSON.parse(jsonMatch[1]) as Record<string, unknown>;
+      } catch {
+        // fall through
+      }
+    }
+    return { analysis: text };
   }
 }
