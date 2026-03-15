@@ -21,7 +21,10 @@ export class OpenAICompatibleProvider implements LLMProvider {
   private defaultMaxTokens: number;
 
   constructor(config: OpenAICompatibleConfig) {
-    this.baseUrl = config.baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '');
+    let url = config.baseUrl;
+    while (url.endsWith('/')) url = url.slice(0, -1);
+    if (url.endsWith('/v1')) url = url.slice(0, -3);
+    this.baseUrl = url;
     this.apiKey = config.apiKey ?? '';
     this.defaultModel = config.model;
     this.defaultMaxTokens = config.maxTokens ?? 4096;

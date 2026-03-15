@@ -144,7 +144,7 @@ async function handleNonStreaming(
   _sourceId: string | undefined,
 ): Promise<NextResponse> {
   // Generate or reuse conversation ID
-  const sessionId = conversationId ?? `conv_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const sessionId = conversationId ?? `conv_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
 
   try {
     // Process with timeout
@@ -255,7 +255,7 @@ function handleStreaming(
   conversationId: string | undefined,
   _sourceId: string | undefined,
 ): Response {
-  const sessionId = conversationId ?? `conv_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const sessionId = conversationId ?? `conv_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
