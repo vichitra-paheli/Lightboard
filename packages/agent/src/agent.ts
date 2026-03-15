@@ -154,6 +154,13 @@ export class Agent {
     yield { type: 'done', stopReason: 'max_tool_rounds' };
   }
 
+  /** Load prior conversation history for multi-turn session persistence. */
+  loadHistory(messages: Message[]): void {
+    for (const msg of messages) {
+      this.conversation.addMessage(msg);
+    }
+  }
+
   /** Reset the conversation history. */
   reset(): void {
     this.conversation.clear();

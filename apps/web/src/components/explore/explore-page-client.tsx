@@ -2,15 +2,17 @@
 
 import { ChartThemeProvider, type ViewSpec } from '@lightboard/viz-core';
 import { useTranslations } from 'next-intl';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ViewRenderer } from '@/components/view-renderer';
 import { ChatPanel } from './chat-panel';
 import type { ChatMessageData } from './chat-message';
 import { DataSourceSelector, type DataSourceOption } from './data-source-selector';
+import { parseSSE } from '@/lib/sse-parser';
 
 /**
  * Client-side Explore page component.
  * Split panel: chat on the left, view renderer on the right.
+ * Supports SSE streaming for real-time agent responses.
  */
 export function ExplorePageClient() {
   const t = useTranslations('explore');
@@ -20,6 +22,8 @@ export function ExplorePageClient() {
   const [currentView, setCurrentView] = useState<ViewSpec | null>(null);
   const [viewData, setViewData] = useState<Record<string, unknown>[] | null>(null);
   const [dataSources, setDataSources] = useState<DataSourceOption[]>([]);
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Fetch data sources from API on mount
   useEffect(() => {
@@ -57,8 +61,115 @@ export function ExplorePageClient() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
+  /** Consumes an SSE stream and updates messages progressively. */
+  const consumeSSEStream = useCallback(
+    async (response: Response, assistantMsgId: string) => {
+      for await (const sseEvent of parseSSE(response)) {
+        try {
+          const data = JSON.parse(sseEvent.data);
+
+          switch (sseEvent.event) {
+            case 'text':
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMsgId
+                    ? { ...m, content: m.content + (data.text ?? '') }
+                    : m,
+                ),
+              );
+              break;
+
+            case 'tool_start':
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMsgId
+                    ? {
+                        ...m,
+                        toolCalls: [
+                          ...(m.toolCalls ?? []),
+                          { name: data.name, status: 'running' as const },
+                        ],
+                      }
+                    : m,
+                ),
+              );
+              break;
+
+            case 'tool_end':
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMsgId
+                    ? {
+                        ...m,
+                        toolCalls: m.toolCalls?.map((tc) =>
+                          tc.name === data.name && tc.status === 'running'
+                            ? { ...tc, status: data.isError ? ('error' as const) : ('done' as const) }
+                            : tc,
+                        ),
+                      }
+                    : m,
+                ),
+              );
+              break;
+
+            case 'view_created':
+              if (data.viewSpec) {
+                setCurrentView(data.viewSpec);
+                if (data.queryResult?.rows) {
+                  setViewData(data.queryResult.rows);
+                }
+              }
+              break;
+
+            case 'done':
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMsgId ? { ...m, isStreaming: false } : m,
+                ),
+              );
+              if (data.conversationId) {
+                setConversationId(data.conversationId);
+              }
+              break;
+
+            case 'error':
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMsgId
+                    ? {
+                        ...m,
+                        content: m.content
+                          ? `${m.content}\n\nError: ${data.error}`
+                          : data.error,
+                        isStreaming: false,
+                      }
+                    : m,
+                ),
+              );
+              break;
+          }
+        } catch {
+          // Skip malformed SSE events
+        }
+      }
+
+      // Ensure streaming flag is cleared even if no done event received
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantMsgId ? { ...m, isStreaming: false } : m,
+        ),
+      );
+    },
+    [],
+  );
+
   const handleSend = useCallback(
     async (message: string) => {
+      // Abort any in-progress stream
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+
       const userMsg: ChatMessageData = {
         id: `msg_${Date.now()}`,
         role: 'user',
@@ -67,15 +178,36 @@ export function ExplorePageClient() {
       setMessages((prev) => [...prev, userMsg]);
       setIsStreaming(true);
 
+      const assistantMsgId = `msg_${Date.now()}_reply`;
+
+      // Create optimistic empty assistant message
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: assistantMsgId,
+          role: 'assistant',
+          content: '',
+          toolCalls: [],
+          isStreaming: true,
+        },
+      ]);
+
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
       try {
-        // Call the agent API endpoint
         const response = await fetch('/api/agent/chat', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'text/event-stream',
+          },
           body: JSON.stringify({
             message,
             sourceId: selectedSource,
+            conversationId,
           }),
+          signal: controller.signal,
         });
 
         if (!response.ok) {
@@ -83,43 +215,81 @@ export function ExplorePageClient() {
           throw new Error(errData.error ?? `Agent request failed: ${response.status}`);
         }
 
-        const result = await response.json();
+        const contentType = response.headers.get('Content-Type') ?? '';
 
-        // Add assistant response
-        const assistantMsg: ChatMessageData = {
-          id: `msg_${Date.now()}_reply`,
-          role: 'assistant',
-          content: result.text ?? t('noResponse'),
-          toolCalls: result.toolCalls?.map((tc: { name: string; isError?: boolean }) => ({
-            name: tc.name,
-            status: tc.isError ? 'error' : 'done',
-          })),
-        };
-        setMessages((prev) => [...prev, assistantMsg]);
+        if (contentType.includes('text/event-stream')) {
+          // SSE streaming mode
+          await consumeSSEStream(response, assistantMsgId);
+        } else {
+          // Fallback to JSON mode
+          const result = await response.json();
 
-        // If the agent created/modified a view, update the right panel
-        if (result.viewSpec) {
-          setCurrentView(result.viewSpec);
-          setViewData(result.queryResult?.rows ?? null);
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId
+                ? {
+                    ...m,
+                    content: result.text ?? t('noResponse'),
+                    toolCalls: result.toolCalls?.map(
+                      (tc: { name: string; status?: string }) => ({
+                        name: tc.name,
+                        status: (tc.status as 'done' | 'error') ?? 'done',
+                      }),
+                    ),
+                    isStreaming: false,
+                  }
+                : m,
+            ),
+          );
+
+          if (result.conversationId) {
+            setConversationId(result.conversationId);
+          }
+
+          if (result.viewSpec) {
+            setCurrentView(result.viewSpec);
+            setViewData(result.queryResult?.rows ?? null);
+          }
         }
       } catch (err) {
-        const errorMsg: ChatMessageData = {
-          id: `msg_${Date.now()}_error`,
-          role: 'assistant',
-          content: err instanceof Error ? err.message : t('noResponse'),
-        };
-        setMessages((prev) => [...prev, errorMsg]);
+        if (err instanceof Error && err.name === 'AbortError') {
+          // Stream was cancelled — mark message as done
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId ? { ...m, isStreaming: false } : m,
+            ),
+          );
+        } else {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId
+                ? {
+                    ...m,
+                    content: err instanceof Error ? err.message : t('noResponse'),
+                    isStreaming: false,
+                  }
+                : m,
+            ),
+          );
+        }
       } finally {
         setIsStreaming(false);
+        abortControllerRef.current = null;
       }
     },
-    [selectedSource, t],
+    [selectedSource, conversationId, t, consumeSSEStream],
   );
 
   const handleNewConversation = useCallback(() => {
+    // Abort any in-progress stream
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
     setMessages([]);
     setCurrentView(null);
     setViewData(null);
+    setConversationId(null);
+    setIsStreaming(false);
   }, []);
 
   return (

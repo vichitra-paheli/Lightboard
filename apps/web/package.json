@@ -14,6 +14,8 @@
   },
   "dependencies": {
     "@lightboard/agent": "workspace:*",
+    "@lightboard/connector-postgres": "workspace:*",
+    "@lightboard/connector-sdk": "workspace:*",
     "@lightboard/db": "workspace:*",
     "@lightboard/query-ir": "workspace:*",
     "@lightboard/ui": "workspace:*",
