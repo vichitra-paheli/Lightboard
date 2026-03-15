@@ -24,6 +24,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <ViewTransitions>
       <html lang={locale} suppressHydrationWarning>
+        <head>
+          <script
+            dangerouslySetInnerHTML={{
+              __html: `(function(){try{var t=localStorage.getItem('lightboard-theme');if(t==='dark'||(t!=='light'&&window.matchMedia('(prefers-color-scheme:dark)').matches))document.documentElement.classList.add('dark');else if(t==='light')document.documentElement.classList.add('light');}catch(e){}})();`,
+            }}
+          />
+        </head>
         <body className="min-h-screen bg-background font-sans antialiased">
           <NextIntlClientProvider messages={messages}>{children}</NextIntlClientProvider>
         </body>

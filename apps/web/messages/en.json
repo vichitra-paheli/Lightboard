@@ -16,7 +16,10 @@
     "dataSources": "Data Sources",
     "views": "Views",
     "settings": "Settings",
-    "logout": "Log out"
+    "logout": "Log out",
+    "themeSystem": "System theme",
+    "themeLight": "Light mode",
+    "themeDark": "Dark mode"
   },
   "home": {
     "title": "Welcome to Lightboard",
