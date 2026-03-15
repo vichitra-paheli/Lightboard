@@ -14,10 +14,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 // Register chart panel plugins on module load
 if (!defaultPanelRegistry.has('bar-chart')) {
-  defaultPanelRegistry.register(barChartPlugin as any);
-  defaultPanelRegistry.register(timeSeriesLinePlugin as any);
-  defaultPanelRegistry.register(statCardPlugin as any);
-  defaultPanelRegistry.register(dataTablePlugin as any);
+  defaultPanelRegistry.register(barChartPlugin as unknown as Parameters<typeof defaultPanelRegistry.register>[0]);
+  defaultPanelRegistry.register(timeSeriesLinePlugin as unknown as Parameters<typeof defaultPanelRegistry.register>[0]);
+  defaultPanelRegistry.register(statCardPlugin as unknown as Parameters<typeof defaultPanelRegistry.register>[0]);
+  defaultPanelRegistry.register(dataTablePlugin as unknown as Parameters<typeof defaultPanelRegistry.register>[0]);
 }
 import { ViewRenderer } from '@/components/view-renderer';
 import { ChatPanel } from './chat-panel';
