@@ -11,7 +11,6 @@ import { redis } from '@/lib/redis';
 import { dataSources } from '@lightboard/db/schema';
 import { eq } from 'drizzle-orm';
 import {
-  Agent,
   LeaderAgent,
   ScratchpadManager,
   LLMError,
