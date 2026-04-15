@@ -20,8 +20,12 @@ Lightboard is **not** a Grafana fork, **not** a monitoring tool, and **not** a B
 │                   App shell                      │
 │  Next.js 15 · Auth · Routing · Plugin mgmt      │
 ├─────────────────────────────────────────────────┤
-│              AI agent layer                      │
-│  Claude API / Local LLM · Tool use · View specs  │
+│         Multi-agent orchestration                │
+│  Leader agent · Query agent · View agent         │
+│  Insights agent · Session scratchpad (DuckDB)    │
+├─────────────────────────────────────────────────┤
+│              AI provider layer                   │
+│  Claude API / Local LLM · Tool use · Streaming   │
 ├─────────────────────────────────────────────────┤
 │            Visualization engine                  │
 │  visx · Panel adapter protocol · Canvas fallback │
@@ -36,6 +40,18 @@ Lightboard is **not** a Grafana fork, **not** a monitoring tool, and **not** a B
 │  Postgres · Redis · S3-compat · Docker/K8s       │
 └─────────────────────────────────────────────────┘
 ```
+
+### Multi-agent architecture (Phase 1.5)
+
+Instead of a single monolithic agent, Lightboard uses a chain of specialized LLM-powered agents:
+
+- **Leader Agent**: Manages conversation, routes intent to specialists, handles scratchpad operations, streams responses to user
+- **Query Agent**: Schema exploration, query construction (QueryIR + raw SQL for JOINs). Receives full schema, focused on data retrieval.
+- **View Agent**: Chart type selection, ViewSpec generation, interactive control wiring. Receives data summaries, not raw schemas.
+- **Insights Agent**: Statistical observations, anomaly detection, trend analysis. Runs analytics via DuckDB.
+- **Session Scratchpad**: Per-conversation DuckDB instance for intermediate data storage. Agents can save query results as named tables and query across them for multi-step analysis.
+
+The leader invokes sub-agents as tools (native tool_use). Sub-agents are "headless" — they run their own tool loops internally and return structured results. Only the leader streams text to the user.
 
 ## Tech stack
 
@@ -132,7 +148,11 @@ lightboard/
 │   ├── query-ir/               # IR types + validators
 │   ├── compute/                # DuckDB integration + Arrow pipeline
 │   ├── viz-core/               # visx chart components + panel adapter
-│   ├── agent/                  # AI agent + tool definitions
+│   ├── agent/                  # Multi-agent orchestration (leader + specialists)
+│   │   ├── agents/             # Sub-agent implementations (query, view, insights)
+│   │   ├── scratchpad/         # DuckDB session scratchpad for intermediate data
+│   │   ├── prompt/             # Per-agent system prompts
+│   │   └── tools/              # Per-agent tool definitions + router
 │   ├── ui/                     # Shared UI components (shadcn-based)
 │   ├── telemetry/              # Telemetry collection + built-in data source
 │   ├── mcp-server/             # MCP server for UI operations

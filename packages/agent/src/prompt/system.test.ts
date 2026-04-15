@@ -5,8 +5,8 @@ describe('buildSystemPrompt', () => {
   it('includes core instructions', () => {
     const prompt = buildSystemPrompt({ dataSources: [] });
     expect(prompt).toContain('data exploration assistant');
-    expect(prompt).toContain('QueryIR');
-    expect(prompt).toContain('get_schema');
+    expect(prompt).toContain('run_sql');
+    expect(prompt).toContain('describe_table');
   });
 
   it('includes data source list', () => {
@@ -24,11 +24,10 @@ describe('buildSystemPrompt', () => {
   it('includes current view state when provided', () => {
     const prompt = buildSystemPrompt({
       dataSources: [],
-      currentView: { title: 'My Chart', chart: { type: 'bar-chart' } },
+      currentView: { title: 'My Chart', html: '<html></html>' },
     });
     expect(prompt).toContain('Current view state');
     expect(prompt).toContain('My Chart');
-    expect(prompt).toContain('bar-chart');
   });
 
   it('omits view section when no current view', () => {
@@ -36,12 +35,11 @@ describe('buildSystemPrompt', () => {
     expect(prompt).not.toContain('Current view state');
   });
 
-  it('mentions all chart types', () => {
+  it('mentions SQL and tool usage', () => {
     const prompt = buildSystemPrompt({ dataSources: [] });
-    expect(prompt).toContain('time-series-line');
-    expect(prompt).toContain('bar-chart');
-    expect(prompt).toContain('stat-card');
-    expect(prompt).toContain('data-table');
+    expect(prompt).toContain('run_sql');
+    expect(prompt).toContain('PostgreSQL');
+    expect(prompt).toContain('LIMIT');
   });
 
   it('mentions self-correction', () => {

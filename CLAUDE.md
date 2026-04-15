@@ -11,14 +11,12 @@ lightboard/
 ├── apps/web/              # Next.js 15 app (app router)
 ├── packages/
 │   ├── connector-sdk/     # TypeScript interface for data sources
-│   ├── connectors/        # Postgres, MySQL, ClickHouse, REST, CSV, Prometheus, ES
-│   ├── query-ir/          # Query intermediate representation (the lingua franca)
-│   ├── compute/           # DuckDB (native + WASM) + Arrow pipeline
-│   ├── viz-core/          # visx chart components + panel adapter protocol
-│   ├── agent/             # AI agent (Claude API) + tool definitions
+│   ├── connectors/        # Postgres connector (others planned)
+│   ├── query-ir/          # Query intermediate representation (used by connectors, not by agent)
+│   ├── viz-core/          # visx chart components (legacy — agent now generates HTML)
+│   ├── agent/             # Multi-agent orchestration (leader + query/view/insights agents + scratchpad)
 │   ├── ui/                # shadcn/ui components (copied, not installed)
 │   ├── telemetry/         # OpenTelemetry SDK + built-in data source
-│   ├── mcp-server/        # MCP server for programmatic UI operations
 │   └── db/                # Drizzle ORM schema + migrations
 ├── plugins/               # Local plugin tarballs (.tar.gz)
 ├── docker/                # Dockerfiles + compose
@@ -28,13 +26,39 @@ lightboard/
 
 ## Key abstractions
 
-**QueryIR** — Every query flows through this JSON intermediate representation. The agent produces it, the visual query builder produces it, template variables interpolate into it, and each connector translates it to native syntax (SQL, PromQL, etc). Defined in `packages/query-ir/`.
+**QueryIR** — A JSON intermediate representation for queries. Used by connectors to translate structured queries to native syntax. The agent no longer produces QueryIR — it writes raw SQL directly via `run_sql`. Defined in `packages/query-ir/`.
 
-**ViewSpec** — The agent's primary output. A declarative JSON doc describing: query (as QueryIR), chart type + config, interactive controls bound to template variables. The `<ViewRenderer>` component takes a ViewSpec and renders a live, interactive panel.
+**HtmlView** — The agent's primary visualization output. A complete, self-contained HTML document rendered in a sandboxed iframe. Contains embedded data, Chart.js charts or SVG, and inline styles. Created via `create_view` tool with `{ title, description, sql, html }`.
 
-**PanelPlugin** — The adapter interface for visualization components. Any React component becomes a Lightboard panel by exporting: `id`, `configSchema` (JSON Schema), `dataShape`, and `Component` (React.FC). The host injects data, config, dimensions, and theme.
+**ViewSpec (legacy)** — The previous visualization format: a declarative JSON doc with QueryIR + chart config + controls. The `<ViewRenderer>` component still supports this for backward compatibility, but new views use HtmlView.
+
+**PanelPlugin (legacy)** — The adapter interface for visx visualization components. Deprecated — new visualizations use agent-generated HTML instead.
 
 **Connector** — The adapter interface for data sources. Methods: `connect`, `introspect`, `query`, `stream`, `healthCheck`, `capabilities`. Each connector is an npm package or local tarball.
+
+## Multi-agent architecture (Phase 1.5)
+
+The agent package (`packages/agent/`) uses a multi-agent orchestration pattern:
+
+```
+packages/agent/src/
+├── agent.ts                    # Agent class (multiAgent flag switches to LeaderAgent)
+├── agents/
+│   ├── types.ts                # SubAgent, AgentTask, SubAgentResult interfaces
+│   ├── leader.ts               # LeaderAgent — orchestrates conversation + delegates
+│   ├── query-agent.ts          # Query specialist (schema, raw SQL)
+│   ├── view-agent.ts           # View specialist (HTML visualization generation)
+│   └── insights-agent.ts       # Insights specialist (stats via DuckDB)
+├── scratchpad/
+│   ├── scratchpad.ts           # SessionScratchpad — per-session in-memory data store
+│   └── manager.ts              # ScratchpadManager — session lifecycle + cleanup
+├── prompt/                     # Per-agent system prompts (focused context)
+├── tools/                      # Per-agent tool definitions + router
+├── conversation/               # ConversationManager (used by leader only)
+└── provider/                   # LLM providers (Claude, OpenAI-compatible)
+```
+
+**Leader** calls sub-agents as tools (`delegate_query`, `delegate_view`, `delegate_insights`). Sub-agents are headless — they return structured `SubAgentResult`, only the leader streams to the user. The session scratchpad allows agents to save intermediate query results as named in-memory tables for multi-step analysis.
 
 ## Tech stack — no substitutions without PR justification
 
@@ -42,7 +66,8 @@ lightboard/
 |---------|----------|----------|
 | Framework | Next.js 15 (app router) | Pages router, Remix, Vite |
 | UI components | shadcn/ui (copied into packages/ui/) | MUI, Ant Design, Chakra |
-| Visualization | visx + d3-scale + d3-shape | Recharts, Nivo, Chart.js |
+| Visualization | Agent-generated HTML (Chart.js/SVG in iframe) | Recharts, Nivo |
+| Visualization (legacy) | visx + d3-scale + d3-shape | — |
 | Data tables | @tanstack/react-table | ag-grid, react-data-grid |
 | Server state | @tanstack/react-query | SWR, Apollo |
 | Client state | Zustand | Redux, Jotai, MobX |
@@ -54,7 +79,7 @@ lightboard/
 | i18n | next-intl | react-i18next, FormatJS |
 | Icons | lucide-react | heroicons, react-icons |
 | Testing | Vitest + Playwright + Testing Library | Jest, Cypress |
-| Compute | DuckDB (native + WASM) + Apache Arrow | Raw JS array processing |
+| Data transfer | JSON rows for agent queries, Arrow IPC for connector interface | Raw JS array processing |
 
 ## Non-negotiable code rules
 
@@ -63,7 +88,7 @@ lightboard/
 3. **JSDoc on every export.** Functions, components, types, interfaces — all get a JSDoc comment.
 4. **No code duplication.** Copy-paste > 3 lines → extract to `packages/` or `lib/`.
 5. **Components < 150 lines.** Business logic in custom hooks, not in JSX.
-6. **Apache Arrow IPC for data transfer**, not JSON. Between server↔client, DuckDB↔Node, workers↔main thread.
+6. **JSON rows for agent query results.** Arrow IPC remains in the connector interface for backward compatibility, but agent tools return JSON `{ columns, rows, rowCount }`.
 7. **react-query for all server state.** staleTime: 5min for metadata, 1min for query results. Never `useEffect` + `fetch`.
 8. **Optimistic updates** for all mutations. Show result immediately, reconcile in background.
 9. **Every table has `org_id`.** Postgres RLS enforces tenant isolation. Route handlers never filter by org_id manually.
@@ -74,13 +99,13 @@ lightboard/
 
 - App shell renders instantly (cached/static). Only content areas show loading skeletons.
 - Prefetch on hover. Virtualize all long lists.
-- Queries push computation to the data source (Tier 1). Cross-source work goes through DuckDB (Tier 2, C++ speed). TypeScript never touches raw data processing.
+- Queries push computation to the data source. The agent writes raw SQL directly. TypeScript never touches raw data processing.
 - SVG for <5K points, Canvas for 5-50K, LTTB downsampling + deck.gl WebGL for 50K+.
 - HTTP compression (Brotli) on all API responses. Schema cache in Redis (10min TTL).
 
 ## Multi-tenancy
 
-Shared database, shared schema. Every row has `org_id`. Postgres RLS policies filter on `app.current_org_id` session variable set by API middleware. DuckDB uses ephemeral per-request instances. Rate limiting is per-org via Redis token bucket. Data source credentials encrypted with per-org key derivation.
+Shared database, shared schema. Every row has `org_id`. Postgres RLS policies filter on `app.current_org_id` session variable set by API middleware. Rate limiting is per-org via Redis token bucket. Data source credentials encrypted with per-org key derivation.
 
 ## Deployment modes
 
@@ -88,31 +113,30 @@ Shared database, shared schema. Every row has `org_id`. Postgres RLS policies fi
 - **On-prem Docker**: Single `docker run` with embedded Postgres/Redis
 - **Airgapped K8s**: Local LLM (Ollama/vLLM) or AI disabled, plugins loaded from `/plugins` directory as .tar.gz files, zero network egress
 
-## MCP server
+## Agent tools
 
-Runs at `/mcp` from day one. Exposes tools for all UI operations so any agent can operate Lightboard programmatically. Also used for E2E testing via tool sequences.
-
-Core tools: `list_data_sources`, `get_schema`, `execute_query`, `create_view`, `modify_view`, `change_visualization`, `set_variable`, `click_row`, `export_view`, `get_current_state`.
+Core tools available to the agent: `get_schema`, `describe_table`, `run_sql`, `create_view`, `modify_view`. The agent writes raw SQL (no QueryIR) and generates complete HTML visualizations (no panel plugins).
 
 ## Project docs (read in order for full context)
 
-1. `00-project-overview.md` — Architecture, tech stack, repo structure, key concepts
-2. `01-phase-1.md` — Phase 1 plan: foundation (weeks 1-6), all code standards, deliverables with schemas
-3. `02-phase-2.md` — Phase 2 plan: persistence + sharing (weeks 7-12), variable system, layouts, RBAC
-4. `lightboard-project-doc.docx` — Full project document with all phases, risk register, tech stack table
+1. `documentation/project_overview.md` — Architecture, tech stack, repo structure, key concepts
+2. `documentation/phase_1.md` — Phase 1 plan: foundation (weeks 1-6), all code standards, deliverables with schemas
+3. `documentation/phase_1.5.md` — Phase 1.5 plan: multi-agent architecture, scratchpad, UI overhaul
+4. `documentation/phase_2.md` — Phase 2 plan: persistence + sharing (weeks 7-12), variable system, layouts, RBAC
 
 ## Commands
 
 ```bash
 # Local dev
-docker compose up                    # Start full stack (app + Postgres + Redis + seed data)
-pnpm dev                             # Start Next.js dev server
+docker compose up -d                 # Start Postgres + Redis
+pnpm dev                             # Start Next.js dev server (Turbopack)
 pnpm test                            # Run all unit + component tests
-pnpm test:e2e                        # Run Playwright E2E tests against Docker stack
-pnpm lint                            # ESLint + Prettier + tsc --noEmit
+pnpm typecheck                       # TypeScript across all packages
+pnpm --filter @lightboard/web lint   # ESLint (catches unused imports, any types)
 pnpm build                           # Production build
 
 # Per-package
+pnpm --filter @lightboard/agent test -- --run   # Agent tests (82 tests)
 pnpm --filter @lightboard/query-ir test
 pnpm --filter @lightboard/viz-core storybook
 

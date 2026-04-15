@@ -9,6 +9,9 @@ export type AgentEvent =
   | { type: 'text'; text: string }
   | { type: 'tool_start'; name: string; id: string }
   | { type: 'tool_end'; name: string; result: string; isError: boolean }
+  | { type: 'agent_start'; agent: string; task: string }
+  | { type: 'agent_end'; agent: string; summary: string }
+  | { type: 'thinking'; text: string }
   | { type: 'done'; stopReason: string };
 
 /** Data sources available to the agent. */
@@ -25,6 +28,10 @@ export interface AgentConfig {
   toolContext: ToolContext;
   dataSources: AgentDataSource[];
   maxToolRounds?: number;
+  /** When true, uses the multi-agent LeaderAgent instead of the monolithic agent. */
+  multiAgent?: boolean;
+  /** Conversation ID for scratchpad association (required when multiAgent=true). */
+  conversationId?: string;
 }
 
 /**

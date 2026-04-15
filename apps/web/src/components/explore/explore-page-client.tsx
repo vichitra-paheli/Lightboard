@@ -19,9 +19,9 @@ if (!defaultPanelRegistry.has('bar-chart')) {
   defaultPanelRegistry.register(statCardPlugin as unknown as Parameters<typeof defaultPanelRegistry.register>[0]);
   defaultPanelRegistry.register(dataTablePlugin as unknown as Parameters<typeof defaultPanelRegistry.register>[0]);
 }
-import { ViewRenderer } from '@/components/view-renderer';
+import { ViewRenderer, HtmlViewRenderer, type HtmlView } from '@/components/view-renderer';
 import { ChatPanel } from './chat-panel';
-import type { ChatMessageData } from './chat-message';
+import type { ChatMessageData, ToolCallData, AgentIndicatorData } from './chat-message';
 import { DataSourceSelector, type DataSourceOption } from './data-source-selector';
 import { parseSSE } from '@/lib/sse-parser';
 
@@ -35,8 +35,11 @@ export function ExplorePageClient() {
   const [messages, setMessages] = useState<ChatMessageData[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [selectedSource, setSelectedSource] = useState<string | null>(null);
-  const [currentView, setCurrentView] = useState<ViewSpec | null>(null);
+  const [currentView, setCurrentView] = useState<ViewSpec | HtmlView | null>(null);
   const [viewData, setViewData] = useState<Record<string, unknown>[] | null>(null);
+
+  /** Type guard: HTML views have an `html` property. */
+  const isHtmlView = (view: ViewSpec | HtmlView): view is HtmlView => 'html' in view;
   const [dataSources, setDataSources] = useState<DataSourceOption[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -88,6 +91,16 @@ export function ExplorePageClient() {
           const data = JSON.parse(sseEvent.data);
 
           switch (sseEvent.event) {
+            case 'thinking':
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMsgId
+                    ? { ...m, thinking: (m.thinking ?? '') + (data.text ?? '') }
+                    : m,
+                ),
+              );
+              break;
+
             case 'text':
               setMessages((prev) =>
                 prev.map((m) =>
@@ -98,21 +111,24 @@ export function ExplorePageClient() {
               );
               break;
 
-            case 'tool_start':
+            case 'tool_start': {
+              const newToolCall: ToolCallData = {
+                name: data.name,
+                status: 'running' as const,
+                ...(data.input ? { input: data.input } : {}),
+              };
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === assistantMsgId
                     ? {
                         ...m,
-                        toolCalls: [
-                          ...(m.toolCalls ?? []),
-                          { name: data.name, status: 'running' as const },
-                        ],
+                        toolCalls: [...(m.toolCalls ?? []), newToolCall],
                       }
                     : m,
                 ),
               );
               break;
+            }
 
             case 'tool_end':
               setMessages((prev) =>
@@ -122,7 +138,12 @@ export function ExplorePageClient() {
                         ...m,
                         toolCalls: m.toolCalls?.map((tc) =>
                           tc.name === data.name && tc.status === 'running'
-                            ? { ...tc, status: data.isError ? ('error' as const) : ('done' as const) }
+                            ? {
+                                ...tc,
+                                status: data.isError ? ('error' as const) : ('done' as const),
+                                ...(data.result !== undefined ? { result: String(data.result) } : {}),
+                                ...(data.durationMs !== undefined ? { durationMs: data.durationMs } : {}),
+                              }
                             : tc,
                         ),
                       }
@@ -140,16 +161,61 @@ export function ExplorePageClient() {
               }
               break;
 
+            case 'agent_start': {
+              const newDelegation: AgentIndicatorData = {
+                agent: data.agent,
+                task: data.task,
+                status: 'running' as const,
+              };
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMsgId
+                    ? {
+                        ...m,
+                        agentDelegations: [
+                          ...(m.agentDelegations ?? []),
+                          newDelegation,
+                        ],
+                      }
+                    : m,
+                ),
+              );
+              break;
+            }
+
+            case 'agent_end':
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMsgId
+                    ? {
+                        ...m,
+                        agentDelegations: m.agentDelegations?.map((d) =>
+                          d.agent === data.agent && d.status === 'running'
+                            ? {
+                                ...d,
+                                status: 'done' as const,
+                                ...(data.summary ? { summary: data.summary } : {}),
+                              }
+                            : d,
+                        ),
+                      }
+                    : m,
+                ),
+              );
+              break;
+
             case 'view_created':
               if (data.viewSpec) {
                 setCurrentView(data.viewSpec);
-                // Use query results: from event, from captured tool results, or fetch
-                if (data.queryResult?.rows) {
+                // HTML views have data embedded — no need to fetch
+                if (data.viewSpec.html) {
+                  setViewData(null);
+                } else if (data.queryResult?.rows) {
                   setViewData(data.queryResult.rows);
                 } else if (lastQueryRows) {
                   setViewData(lastQueryRows);
                 } else {
-                  // Otherwise, execute the ViewSpec's query to get data
+                  // Legacy ViewSpec path: execute the query to get data
                   const query = data.viewSpec.query;
                   const sourceId = query?.source;
                   if (sourceId) {
@@ -178,6 +244,7 @@ export function ExplorePageClient() {
                   m.id === assistantMsgId ? { ...m, isStreaming: false } : m,
                 ),
               );
+              setIsStreaming(false);
               if (data.conversationId) {
                 setConversationId(data.conversationId);
               }
@@ -239,6 +306,7 @@ export function ExplorePageClient() {
           role: 'assistant',
           content: '',
           toolCalls: [],
+          agentDelegations: [],
           isStreaming: true,
         },
       ]);
@@ -299,10 +367,13 @@ export function ExplorePageClient() {
 
           if (result.viewSpec) {
             setCurrentView(result.viewSpec);
-            if (result.queryResult?.rows) {
+            // HTML views have data embedded — no need to fetch
+            if (result.viewSpec.html) {
+              setViewData(null);
+            } else if (result.queryResult?.rows) {
               setViewData(result.queryResult.rows);
             } else {
-              // Execute the ViewSpec's query to get data for the chart
+              // Legacy ViewSpec path: execute the query to get data
               const query = result.viewSpec.query;
               const srcId = query?.source;
               if (srcId) {
@@ -347,17 +418,25 @@ export function ExplorePageClient() {
     [selectedSource, conversationId, t, consumeSSEStream],
   );
 
-  const handleNewConversation = useCallback(() => {
-    // Abort any in-progress stream
+  /** Stop the current agent stream. */
+  const handleStop = useCallback(() => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
+      abortControllerRef.current = null;
     }
+    setIsStreaming(false);
+    setMessages((prev) =>
+      prev.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m)),
+    );
+  }, []);
+
+  const handleNewConversation = useCallback(() => {
+    handleStop();
     setMessages([]);
     setCurrentView(null);
     setViewData(null);
     setConversationId(null);
-    setIsStreaming(false);
-  }, []);
+  }, [handleStop]);
 
   return (
     <ChartThemeProvider mode="dark">
@@ -379,6 +458,7 @@ export function ExplorePageClient() {
             <ChatPanel
               messages={messages}
               onSend={handleSend}
+              onStop={handleStop}
               onNewConversation={handleNewConversation}
               isStreaming={isStreaming}
             />
@@ -386,9 +466,14 @@ export function ExplorePageClient() {
 
           {/* Right: View */}
           <div className="flex-1 overflow-auto">
-            {currentView ? (
+            {currentView && isHtmlView(currentView) ? (
+              <HtmlViewRenderer
+                view={currentView}
+                isLoading={isStreaming}
+              />
+            ) : currentView ? (
               <ViewRenderer
-                spec={currentView}
+                spec={currentView as ViewSpec}
                 data={viewData}
                 isLoading={isStreaming}
                 error={null}

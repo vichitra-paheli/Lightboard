@@ -5,6 +5,7 @@ import type {
   ConnectorCapabilities,
   ConnectorConfig,
   HealthCheckResult,
+  JsonResult,
   QueryOptions,
   SchemaMetadata,
 } from '@lightboard/connector-sdk';
@@ -219,6 +220,40 @@ export class PostgresConnector implements Connector {
       }
 
       cursor.close(() => {});
+    } finally {
+      client.release();
+    }
+  }
+
+  /** Execute a raw SQL query and return JSON rows. */
+  async querySQL(sql: string, params?: unknown[], options?: QueryOptions): Promise<JsonResult> {
+    const pool = this.getPool();
+    const client = await pool.connect();
+
+    try {
+      // Read-only transaction with timeout
+      await client.query('BEGIN READ ONLY');
+      if (options?.timeoutMs) {
+        await client.query(`SET LOCAL statement_timeout = ${options.timeoutMs}`);
+      }
+
+      const result = await client.query(sql, params ?? []);
+
+      await client.query('COMMIT');
+
+      const columns = result.fields.map((f) => ({
+        name: f.name,
+        type: this.typeMap.get(f.dataTypeID) ?? 'text',
+      }));
+
+      return {
+        columns,
+        rows: result.rows as Record<string, unknown>[],
+        rowCount: result.rowCount ?? result.rows.length,
+      };
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
     } finally {
       client.release();
     }

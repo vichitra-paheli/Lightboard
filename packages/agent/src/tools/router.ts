@@ -1,16 +1,19 @@
-import { queryIRSchema } from '@lightboard/query-ir';
 import { z } from 'zod';
+
+import type { ToolDefinition } from '../provider/types';
 
 /** Context provided to tool handlers for accessing services. */
 export interface ToolContext {
   /** Get schema metadata for a data source. */
   getSchema: (sourceId: string) => Promise<Record<string, unknown>>;
-  /** Execute a query against a data source. */
-  executeQuery: (sourceId: string, queryIR: Record<string, unknown>) => Promise<Record<string, unknown>>;
-  /** Execute raw SQL against a data source (for complex joins). */
+  /** Execute raw SQL against a data source. */
   runSQL?: (sourceId: string, sql: string) => Promise<Record<string, unknown>>;
+  /** Describe a single table: columns, types, and sample rows. */
+  describeTable?: (sourceId: string, tableName: string) => Promise<Record<string, unknown>>;
   /** Get the current view state. */
   getCurrentView?: () => Record<string, unknown> | null;
+  /** Execute DuckDB SQL on the session scratchpad for statistical analysis. */
+  analyzeData?: (sql: string) => Promise<Record<string, unknown>>;
 }
 
 /** Result of a tool execution. */
@@ -24,76 +27,115 @@ const toolInputSchemas = {
   get_schema: z.object({
     source_id: z.string().min(1),
   }),
-  execute_query: z.object({
+  describe_table: z.object({
     source_id: z.string().min(1),
-    query_ir: z.record(z.unknown()),
+    table_name: z.string().min(1),
   }),
   create_view: z.object({
-    view_spec: z.object({
-      title: z.string().optional(),
-      description: z.string().optional(),
-      query: z.record(z.unknown()),
-      chart: z.object({
-        type: z.string(),
-        config: z.record(z.unknown()),
-      }),
-      controls: z.array(z.record(z.unknown())).optional(),
-    }),
+    title: z.string(),
+    description: z.string().optional(),
+    sql: z.string(),
+    html: z.string(),
   }),
   modify_view: z.object({
     view_id: z.string().min(1),
-    patch: z.record(z.unknown()),
+    title: z.string().optional(),
+    description: z.string().optional(),
+    sql: z.string().optional(),
+    html: z.string().optional(),
   }),
   run_sql: z.object({
     source_id: z.string().min(1),
     sql: z.string().min(1),
   }),
+  analyze_data: z.object({
+    sql: z.string().min(1),
+    description: z.string().optional(),
+  }),
 };
 
 /**
  * Routes tool calls from the LLM to the appropriate handler.
- * Each handler validates inputs, delegates to services, and returns
- * structured results (or errors for agent self-correction).
+ * Accepts a dynamic set of tool definitions at construction time,
+ * allowing different agents to use different tool subsets.
  */
 export class ToolRouter {
   private context: ToolContext;
   private viewStore = new Map<string, Record<string, unknown>>();
+  private allowedTools: Set<string>;
 
-  constructor(context: ToolContext) {
+  constructor(context: ToolContext, toolDefinitions?: ToolDefinition[]) {
     this.context = context;
+    this.allowedTools = toolDefinitions
+      ? new Set(toolDefinitions.map((t) => t.name))
+      : new Set(['get_schema', 'run_sql', 'describe_table', 'create_view', 'modify_view']);
   }
 
   /** Execute a tool call and return the result. Errors are returned, not thrown. */
   async execute(toolName: string, input: Record<string, unknown>): Promise<ToolExecutionResult> {
+    if (!this.allowedTools.has(toolName)) {
+      return { content: `Tool "${toolName}" is not available for this agent`, isError: true };
+    }
+
     // Auto-parse stringified JSON values — local models often send nested objects as strings
     const normalizedInput = this.normalizeInput(input);
-    // Debug: log normalization for troubleshooting local model issues
     for (const [key, val] of Object.entries(input)) {
       if (typeof val === 'string' && typeof normalizedInput[key] !== 'string') {
         console.log(`[ToolRouter] Normalized "${key}" from string to ${typeof normalizedInput[key]}`);
       }
-      if (typeof val === 'string' && typeof normalizedInput[key] === 'string' && val.includes('{')) {
-        console.log(`[ToolRouter] WARNING: "${key}" is still a string after normalization. First 100 chars: ${val.slice(0, 100)}`);
-      }
     }
+
+    // Log raw input for debugging
+    console.log(`[ToolRouter] Raw input: ${JSON.stringify(normalizedInput).slice(0, 300)}`);
+
+    // Log tool call with compact input summary
+    const inputSummary = toolName === 'run_sql'
+      ? `sql=${JSON.stringify((normalizedInput as Record<string, unknown>).sql)}`
+      : toolName === 'create_view'
+        ? `title=${JSON.stringify((normalizedInput as Record<string, unknown>).title)}, html=${((normalizedInput as Record<string, unknown>).html as string)?.length ?? 0} chars`
+        : toolName === 'describe_table'
+          ? `table=${(normalizedInput as Record<string, unknown>).table_name}`
+          : JSON.stringify(normalizedInput).slice(0, 150);
+    console.log(`[ToolRouter] ▶ ${toolName}(${inputSummary})`);
+    const start = performance.now();
+
     try {
+      let result: ToolExecutionResult;
       switch (toolName) {
         case 'get_schema':
-          return await this.handleGetSchema(normalizedInput);
-        case 'execute_query':
-          return await this.handleExecuteQuery(normalizedInput);
+          result = await this.handleGetSchema(normalizedInput);
+          break;
+        case 'describe_table':
+          result = await this.handleDescribeTable(normalizedInput);
+          break;
         case 'run_sql':
-          return await this.handleRunSQL(normalizedInput);
+          result = await this.handleRunSQL(normalizedInput);
+          break;
         case 'create_view':
-          return await this.handleCreateView(normalizedInput);
+          result = await this.handleCreateView(normalizedInput);
+          break;
         case 'modify_view':
-          return await this.handleModifyView(normalizedInput);
+          result = await this.handleModifyView(normalizedInput);
+          break;
+        case 'analyze_data':
+          result = await this.handleAnalyzeData(normalizedInput);
+          break;
         default:
           return { content: `Unknown tool: ${toolName}`, isError: true };
       }
+
+      const elapsed = Math.round(performance.now() - start);
+      const resultPreview = result.isError
+        ? result.content.slice(0, 200)
+        : `${result.content.length} chars`;
+      console.log(`[ToolRouter] ${result.isError ? '✗' : '✓'} ${toolName} (${elapsed}ms) → ${resultPreview}`);
+      return result;
     } catch (err) {
+      const elapsed = Math.round(performance.now() - start);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error(`[ToolRouter] ✗ ${toolName} (${elapsed}ms) threw: ${errMsg}`);
       return {
-        content: `Tool "${toolName}" failed: ${err instanceof Error ? err.message : String(err)}`,
+        content: `Tool "${toolName}" failed: ${errMsg}`,
         isError: true,
       };
     }
@@ -113,21 +155,25 @@ export class ToolRouter {
     return { content: JSON.stringify(schema, null, 2), isError: false };
   }
 
-  /** Handle execute_query tool call. */
-  private async handleExecuteQuery(input: Record<string, unknown>): Promise<ToolExecutionResult> {
-    const parsed = toolInputSchemas.execute_query.safeParse(input);
+  /** Handle describe_table tool call — returns column details and sample rows. */
+  private async handleDescribeTable(input: Record<string, unknown>): Promise<ToolExecutionResult> {
+    const parsed = toolInputSchemas.describe_table.safeParse(input);
     if (!parsed.success) {
       return {
-        content: `Invalid input for execute_query. Expected: {"source_id": "<id>", "query_ir": {"source": "<id>", "table": "<name>", ...}}. Got: ${JSON.stringify(input).slice(0, 200)}. Error: ${parsed.error.message}`,
+        content: `Invalid input for describe_table. Expected: {"source_id": "<id>", "table_name": "<name>"}. Error: ${parsed.error.message}`,
         isError: true,
       };
     }
 
-    const result = await this.context.executeQuery(parsed.data.source_id, parsed.data.query_ir);
+    if (!this.context.describeTable) {
+      return { content: 'describe_table is not available', isError: true };
+    }
+
+    const result = await this.context.describeTable(parsed.data.source_id, parsed.data.table_name);
     return { content: JSON.stringify(result, null, 2), isError: false };
   }
 
-  /** Handle create_view tool call. */
+  /** Handle create_view tool call — stores an HTML view. */
   private async handleCreateView(input: Record<string, unknown>): Promise<ToolExecutionResult> {
     const parsed = toolInputSchemas.create_view.safeParse(input);
     if (!parsed.success) {
@@ -135,7 +181,12 @@ export class ToolRouter {
     }
 
     const viewId = `view_${Date.now()}`;
-    const viewSpec = parsed.data.view_spec;
+    const viewSpec = {
+      title: parsed.data.title,
+      description: parsed.data.description,
+      sql: parsed.data.sql,
+      html: parsed.data.html,
+    };
     this.viewStore.set(viewId, viewSpec);
 
     return {
@@ -144,7 +195,7 @@ export class ToolRouter {
     };
   }
 
-  /** Handle modify_view tool call. */
+  /** Handle modify_view tool call — patches an existing HTML view. */
   private async handleModifyView(input: Record<string, unknown>): Promise<ToolExecutionResult> {
     const parsed = toolInputSchemas.modify_view.safeParse(input);
     if (!parsed.success) {
@@ -156,7 +207,13 @@ export class ToolRouter {
       return { content: `View "${parsed.data.view_id}" not found`, isError: true };
     }
 
-    const updated = { ...existing, ...parsed.data.patch };
+    const patch: Record<string, unknown> = {};
+    if (parsed.data.title) patch.title = parsed.data.title;
+    if (parsed.data.description) patch.description = parsed.data.description;
+    if (parsed.data.sql) patch.sql = parsed.data.sql;
+    if (parsed.data.html) patch.html = parsed.data.html;
+
+    const updated = { ...existing, ...patch };
     this.viewStore.set(parsed.data.view_id, updated);
 
     return {
@@ -177,6 +234,21 @@ export class ToolRouter {
     }
 
     const result = await this.context.runSQL(parsed.data.source_id, parsed.data.sql);
+    return { content: JSON.stringify(result, null, 2), isError: false };
+  }
+
+  /** Handle analyze_data tool call — DuckDB analytics on the scratchpad. */
+  private async handleAnalyzeData(input: Record<string, unknown>): Promise<ToolExecutionResult> {
+    const parsed = toolInputSchemas.analyze_data.safeParse(input);
+    if (!parsed.success) {
+      return { content: `Invalid input for analyze_data: ${parsed.error.message}`, isError: true };
+    }
+
+    if (!this.context.analyzeData) {
+      return { content: 'analyze_data is not available — no scratchpad configured', isError: true };
+    }
+
+    const result = await this.context.analyzeData(parsed.data.sql);
     return { content: JSON.stringify(result, null, 2), isError: false };
   }
 

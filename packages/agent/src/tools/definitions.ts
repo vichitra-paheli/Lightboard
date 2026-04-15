@@ -19,45 +19,11 @@ export const agentTools: ToolDefinition[] = [
     },
   },
   {
-    name: 'execute_query',
-    description:
-      'Execute a query against a data source using QueryIR (not raw SQL). ' +
-      'Returns the query results. Use get_schema first to understand the available tables and columns.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        source_id: {
-          type: 'string',
-          description: 'The data source to query',
-        },
-        query_ir: {
-          type: 'object',
-          description: 'The QueryIR document describing the query',
-          properties: {
-            source: { type: 'string' },
-            table: { type: 'string' },
-            select: { type: 'array', items: { type: 'object' } },
-            filter: { type: 'object' },
-            aggregations: { type: 'array', items: { type: 'object' } },
-            groupBy: { type: 'array', items: { type: 'object' } },
-            orderBy: { type: 'array', items: { type: 'object' } },
-            timeRange: { type: 'object' },
-            joins: { type: 'array', items: { type: 'object' } },
-            limit: { type: 'number' },
-            offset: { type: 'number' },
-          },
-          required: ['source', 'table'],
-        },
-      },
-      required: ['source_id', 'query_ir'],
-    },
-  },
-  {
     name: 'run_sql',
     description:
-      'Execute a read-only SELECT SQL query directly against a data source. ' +
-      'Use this for complex queries involving JOINs that are hard to express in QueryIR. ' +
-      'Only SELECT queries are allowed. Results are limited to 1000 rows.',
+      'Execute a read-only SELECT SQL query against a data source. ' +
+      'This is the primary tool for retrieving data. Write standard PostgreSQL SELECT statements. ' +
+      'Only SELECT queries are allowed. Results are limited to 500 rows.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -74,54 +40,47 @@ export const agentTools: ToolDefinition[] = [
     },
   },
   {
-    name: 'create_view',
+    name: 'describe_table',
     description:
-      'Create an interactive visualization view from query results. ' +
-      'Specify the chart type, configuration, and interactive controls. ' +
-      'Controls should include dropdowns for categorical columns and date range pickers for time columns.',
+      'Get detailed information about a specific table including column names, types, and sample rows. ' +
+      'Use this before writing queries to understand what data is available and what values columns contain.',
     inputSchema: {
       type: 'object',
       properties: {
-        view_spec: {
-          type: 'object',
-          description: 'The ViewSpec document describing the view',
-          properties: {
-            title: { type: 'string', description: 'Title for the view' },
-            description: { type: 'string', description: 'Description of what the view shows' },
-            query: { type: 'object', description: 'QueryIR for the view data' },
-            chart: {
-              type: 'object',
-              properties: {
-                type: { type: 'string', description: 'Panel plugin ID (time-series-line, bar-chart, stat-card, data-table)' },
-                config: { type: 'object', description: 'Chart-specific configuration' },
-              },
-              required: ['type', 'config'],
-            },
-            controls: {
-              type: 'array',
-              items: {
-                type: 'object',
-                properties: {
-                  type: { type: 'string', enum: ['dropdown', 'multi_select', 'date_range', 'text_input', 'toggle'] },
-                  label: { type: 'string' },
-                  variable: { type: 'string', description: 'Template variable name (without $)' },
-                  defaultValue: {},
-                },
-                required: ['type', 'label', 'variable'],
-              },
-            },
-          },
-          required: ['query', 'chart'],
+        source_id: {
+          type: 'string',
+          description: 'The data source containing the table',
+        },
+        table_name: {
+          type: 'string',
+          description: 'The name of the table to describe',
         },
       },
-      required: ['view_spec'],
+      required: ['source_id', 'table_name'],
+    },
+  },
+  {
+    name: 'create_view',
+    description:
+      'Create a visualization from query results. ' +
+      'Generate a complete, self-contained HTML document that renders the chart or table. ' +
+      'The HTML will be displayed in a sandboxed iframe.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Title for the view' },
+        description: { type: 'string', description: 'Description of what the view shows' },
+        sql: { type: 'string', description: 'The SQL query that produced the data (for re-execution)' },
+        html: { type: 'string', description: 'Complete self-contained HTML document with embedded data and chart rendering' },
+      },
+      required: ['title', 'sql', 'html'],
     },
   },
   {
     name: 'modify_view',
     description:
-      'Modify an existing view — change chart type, add/remove controls, update filters, adjust configuration. ' +
-      'Use this for follow-up requests like "show it as a bar chart" or "add a filter for region".',
+      'Modify an existing view — change the visualization, update the data query, or adjust the layout. ' +
+      'Use this for follow-up requests like "show it as a bar chart" or "add a trend line".',
     inputSchema: {
       type: 'object',
       properties: {
@@ -129,19 +88,12 @@ export const agentTools: ToolDefinition[] = [
           type: 'string',
           description: 'The ID of the view to modify',
         },
-        patch: {
-          type: 'object',
-          description: 'Partial ViewSpec with only the fields to change',
-          properties: {
-            title: { type: 'string' },
-            description: { type: 'string' },
-            query: { type: 'object' },
-            chart: { type: 'object' },
-            controls: { type: 'array' },
-          },
-        },
+        title: { type: 'string', description: 'New title (optional)' },
+        description: { type: 'string', description: 'New description (optional)' },
+        sql: { type: 'string', description: 'Updated SQL query (optional)' },
+        html: { type: 'string', description: 'Updated HTML document (optional)' },
       },
-      required: ['view_id', 'patch'],
+      required: ['view_id'],
     },
   },
 ];

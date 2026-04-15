@@ -3,7 +3,6 @@ import { getAdminDb, withAuth } from '@/lib/auth';
 import {
   getDataSourceConnection,
   introspectSchema,
-  executeQueryIR,
   executeRawSQL,
   DataSourceError,
 } from '@/lib/data-source-service';
@@ -12,7 +11,8 @@ import { redis } from '@/lib/redis';
 import { dataSources } from '@lightboard/db/schema';
 import { eq } from 'drizzle-orm';
 import {
-  Agent,
+  LeaderAgent,
+  ScratchpadManager,
   LLMError,
   type AgentDataSource,
   type AgentEvent,
@@ -20,6 +20,39 @@ import {
   type ToolContext,
 } from '@lightboard/agent';
 import { resolveAIProvider } from '@/lib/ai-provider';
+
+/**
+ * Singleton ScratchpadManager for session scratchpad lifecycle.
+ * Shared across all requests — each conversation gets its own scratchpad.
+ */
+const scratchpadManager = new ScratchpadManager({
+  cleanupIntervalMs: 5 * 60 * 1000,
+  maxSessionAgeMs: 60 * 60 * 1000,
+});
+
+/**
+ * Cache of LeaderAgent instances by session ID.
+ * Leaders persist across turns to maintain conversation state in-memory,
+ * avoiding Redis round-trips and keeping the ConversationManager warm.
+ * Entries expire after 1 hour of inactivity.
+ */
+const leaderCache = new Map<string, { leader: LeaderAgent; lastAccess: number }>();
+
+/** Max age for cached leaders before eviction (1 hour). */
+const LEADER_CACHE_MAX_AGE_MS = 60 * 60 * 1000;
+
+/** Periodically evict stale leaders. */
+const leaderCleanupInterval = setInterval(() => {
+  const now = Date.now();
+  for (const [id, entry] of leaderCache) {
+    if (now - entry.lastAccess > LEADER_CACHE_MAX_AGE_MS) {
+      leaderCache.delete(id);
+    }
+  }
+}, 5 * 60 * 1000);
+if (typeof leaderCleanupInterval === 'object' && 'unref' in leaderCleanupInterval) {
+  (leaderCleanupInterval as NodeJS.Timeout).unref();
+}
 
 /** Maximum duration for agent processing in milliseconds. */
 const AGENT_TIMEOUT_MS = 300_000;
@@ -45,15 +78,16 @@ export const POST = withAuth(async (req, { db, orgId }) => {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  const { message, sourceId, conversationId } = body as {
+  const { message, conversationId } = body as {
     message?: string;
-    sourceId?: string;
     conversationId?: string;
   };
 
   if (!message) {
     return NextResponse.json({ error: 'Message is required' }, { status: 400 });
   }
+
+  console.log(`[Chat] ← "${message.slice(0, 100)}" (conv=${conversationId ?? 'new'}, org=${orgId})`);
 
   // Rate limiting
   const rateResult = await checkRateLimit(orgId, AGENT_RATE_LIMIT_BUCKET);
@@ -105,71 +139,85 @@ export const POST = withAuth(async (req, { db, orgId }) => {
       const schema = await introspectSchema(connection);
       return schema as unknown as Record<string, unknown>;
     },
-    executeQuery: async (srcId: string, rawQueryIR: Record<string, unknown> | string) => {
-      // Local models sometimes send queryIR as a JSON string — parse it
-      let queryIR: Record<string, unknown>;
-      if (typeof rawQueryIR === 'string') {
-        try {
-          queryIR = JSON.parse(rawQueryIR) as Record<string, unknown>;
-        } catch {
-          throw new DataSourceError('Invalid QueryIR: received string that is not valid JSON', 'validation');
-        }
-      } else {
-        queryIR = rawQueryIR;
-      }
-      const connection = await getDataSourceConnection(adminDb, orgId, srcId);
-      const result = await executeQueryIR(connection, queryIR);
-      return result as unknown as Record<string, unknown>;
-    },
     runSQL: async (srcId: string, sql: string) => {
       const connection = await getDataSourceConnection(adminDb, orgId, srcId);
       const result = await executeRawSQL(connection, sql);
       return result as unknown as Record<string, unknown>;
     },
+    describeTable: async (srcId: string, tableName: string) => {
+      const connection = await getDataSourceConnection(adminDb, orgId, srcId);
+      const schema = await introspectSchema(connection);
+      const schemaObj = schema as { tables?: Array<{ name: string; columns: unknown[] }> };
+      const table = schemaObj.tables?.find((t) => t.name === tableName);
+      if (!table) {
+        throw new DataSourceError(`Table "${tableName}" not found`, 'not_found');
+      }
+      // Get sample rows
+      const sampleResult = await executeRawSQL(
+        connection,
+        `SELECT * FROM "${tableName}" LIMIT 5`,
+      );
+      return {
+        table: tableName,
+        columns: table.columns,
+        sampleRows: (sampleResult as { rows?: unknown[] }).rows ?? [],
+      } as unknown as Record<string, unknown>;
+    },
   };
 
-  // Instantiate agent with resolved provider
-  const agent = new Agent({
-    provider,
-    toolContext,
-    dataSources: agentDataSources,
-  });
+  // Generate or reuse conversation/session ID
+  const sessionId = conversationId ?? `conv_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
 
-  // Load conversation history from Redis if conversationId provided
-  if (conversationId) {
-    const stored = await loadConversation(orgId, conversationId);
-    if (stored) {
-      agent.loadHistory(stored);
+  // Reuse existing LeaderAgent for this session, or create a new one.
+  // Leaders persist across turns to keep conversation state in-memory.
+  let leader: LeaderAgent;
+  const cached = leaderCache.get(sessionId);
+  if (cached) {
+    leader = cached.leader;
+    cached.lastAccess = Date.now();
+  } else {
+    leader = new LeaderAgent({
+      provider,
+      toolContext,
+      dataSources: agentDataSources,
+      scratchpadManager,
+    });
+
+    // Load conversation history from Redis for cold-start recovery
+    if (conversationId) {
+      const stored = await loadConversation(orgId, conversationId);
+      if (stored) {
+        leader.loadHistory(stored);
+      }
     }
+
+    leaderCache.set(sessionId, { leader, lastAccess: Date.now() });
   }
 
   // Check if client wants SSE streaming
   const acceptHeader = req.headers.get('Accept') ?? '';
   const wantsStream = acceptHeader.includes('text/event-stream');
 
+  console.log(`[Chat] Mode: ${wantsStream ? 'SSE streaming' : 'JSON'}, session=${sessionId}`);
   if (wantsStream) {
-    return handleStreaming(agent, message, orgId, conversationId, sourceId);
+    return handleStreaming(leader, message, orgId, sessionId);
   }
 
-  return handleNonStreaming(agent, message, orgId, conversationId, sourceId);
+  return handleNonStreaming(leader, message, orgId, sessionId);
 });
 
 /**
  * Handles non-streaming agent chat — collects all events and returns a single JSON response.
  */
 async function handleNonStreaming(
-  agent: Agent,
+  leader: LeaderAgent,
   message: string,
   orgId: string,
-  conversationId: string | undefined,
-  _sourceId: string | undefined,
+  sessionId: string,
 ): Promise<NextResponse> {
-  // Generate or reuse conversation ID
-  const sessionId = conversationId ?? `conv_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
-
   try {
     // Process with timeout
-    const events = await collectWithTimeout(agent.chat(message), AGENT_TIMEOUT_MS);
+    const events = await collectWithTimeout(leader.chat(message, sessionId), AGENT_TIMEOUT_MS);
 
     // Extract results
     let text = '';
@@ -197,8 +245,8 @@ async function handleNonStreaming(
             } catch { /* ignore parse errors */ }
           }
 
-          // Extract query results from execute_query
-          if (event.name === 'execute_query' && !event.isError) {
+          // Extract query results from run_sql
+          if (event.name === 'run_sql' && !event.isError) {
             try {
               queryResult = JSON.parse(event.result);
             } catch { /* ignore parse errors */ }
@@ -209,8 +257,11 @@ async function handleNonStreaming(
     }
 
     // Save conversation to Redis
-    const updatedHistory = agent.getHistory();
+    const updatedHistory = leader.getHistory();
     await saveConversation(orgId, sessionId, updatedHistory);
+
+    const toolSummary = toolCalls.map((t) => `${t.name}:${t.status}`).join(', ');
+    console.log(`[Chat] → ${text.length}c text, tools=[${toolSummary}], view=${viewSpec ? 'yes' : 'no'}`);
 
     return NextResponse.json({
       conversationId: sessionId,
@@ -270,13 +321,11 @@ async function handleNonStreaming(
  * Handles SSE streaming — emits events as they arrive from the agent.
  */
 function handleStreaming(
-  agent: Agent,
+  leader: LeaderAgent,
   message: string,
   orgId: string,
-  conversationId: string | undefined,
-  _sourceId: string | undefined,
+  sessionId: string,
 ): Response {
-  const sessionId = conversationId ?? `conv_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
@@ -300,7 +349,7 @@ function handleStreaming(
         });
 
         const processStream = async () => {
-          for await (const event of agent.chat(message)) {
+          for await (const event of leader.chat(message, sessionId)) {
             switch (event.type) {
               case 'text':
                 enqueue('text', { text: event.text });
@@ -315,24 +364,41 @@ function handleStreaming(
                   isError: event.isError,
                 });
 
-                // Emit view_created for create_view / modify_view tool results
-                if ((event.name === 'create_view' || event.name === 'modify_view') && !event.isError) {
+                // Emit view_created for view-related tool results
+                if (!event.isError) {
                   try {
                     const parsed = JSON.parse(event.result);
-                    if (parsed.viewSpec) {
+                    // Direct create_view/modify_view (single-agent path)
+                    if ((event.name === 'create_view' || event.name === 'modify_view') && parsed.viewSpec) {
                       enqueue('view_created', { viewSpec: parsed.viewSpec });
                     }
-                  } catch { /* ignore */ }
+                    // delegate_view (multi-agent path) — ViewSpec is in the sub-agent result
+                    if (event.name === 'delegate_view' && parsed.viewSpec) {
+                      enqueue('view_created', { viewSpec: parsed.viewSpec });
+                    } else if (event.name === 'delegate_view' && parsed.viewId) {
+                      enqueue('view_created', { viewSpec: parsed });
+                    }
+                  } catch { /* ignore parse errors */ }
                 }
                 break;
               }
-              case 'done':
+              case 'agent_start':
+                enqueue('agent_start', { agent: event.agent, task: event.task });
+                break;
+              case 'agent_end':
+                enqueue('agent_end', { agent: event.agent, summary: event.summary });
+                break;
+              case 'thinking':
+                enqueue('thinking', { text: event.text });
+                break;
+              case 'done': {
                 // Save conversation before closing
-                const history = agent.getHistory();
+                const history = leader.getHistory();
                 await saveConversation(orgId, sessionId, history);
 
                 enqueue('done', { stopReason: event.stopReason, conversationId: sessionId });
                 break;
+              }
             }
           }
         };

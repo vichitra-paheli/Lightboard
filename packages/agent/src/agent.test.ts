@@ -33,7 +33,7 @@ function mockToolContext(): ToolContext {
         },
       ],
     }),
-    executeQuery: vi.fn().mockResolvedValue({
+    runSQL: vi.fn().mockResolvedValue({
       rows: [
         { region: 'North', total: 5000 },
         { region: 'South', total: 3200 },
@@ -109,14 +109,9 @@ describe('Agent', () => {
             id: 'tc_1',
             name: 'create_view',
             input: {
-              view_spec: {
-                title: 'Sales by Region',
-                query: { source: 'pg-main', table: 'orders' },
-                chart: { type: 'bar-chart', config: { xField: 'region', yFields: ['total'] } },
-                controls: [
-                  { type: 'dropdown', label: 'Status', variable: 'status' },
-                ],
-              },
+              title: 'Sales by Region',
+              sql: 'SELECT region, SUM(amount) AS total FROM orders GROUP BY region',
+              html: '<html><body><canvas id="chart"></canvas></body></html>',
             },
           },
           { type: 'message_end', stopReason: 'tool_use' },
@@ -137,7 +132,7 @@ describe('Agent', () => {
     expect(toolEnd.isError).toBe(false);
 
     const parsed = JSON.parse(toolEnd.result);
-    expect(parsed.viewSpec.chart.type).toBe('bar-chart');
+    expect(parsed.viewSpec.html).toContain('<html>');
   });
 
   it('handles tool errors gracefully', async () => {

@@ -30,6 +30,7 @@
     "placeholder": "Ask a question about your data...",
     "newConversation": "New conversation",
     "send": "Send",
+    "stop": "Stop",
     "dataSource": "Data source",
     "selectDataSource": "Select a data source...",
     "noResponse": "No response from agent."
@@ -99,6 +100,20 @@
     "registerPrompt": "Already have an account?",
     "invalidCredentials": "Invalid email or password.",
     "emailInUse": "An account with this email already exists."
+  },
+  "chat": {
+    "thinking": "Thinking...",
+    "thinkingLabel": "View reasoning",
+    "copyCode": "Copy",
+    "agentQuery": "Querying data...",
+    "agentView": "Creating visualization...",
+    "agentInsights": "Analyzing patterns...",
+    "agentDone": "Done",
+    "toolInput": "Input",
+    "toolOutput": "Output",
+    "toolDuration": "Duration",
+    "toolExpand": "Show details",
+    "toolCollapse": "Hide details"
   },
   "view": {
     "loading": "Loading data...",

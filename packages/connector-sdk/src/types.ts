@@ -84,6 +84,16 @@ export interface ConnectorCapabilities {
   streaming: boolean;
 }
 
+/** Query result as JSON rows — simpler alternative to Arrow for small result sets. */
+export interface JsonResult {
+  /** Column metadata. */
+  columns: { name: string; type: string }[];
+  /** Result rows as key-value objects. */
+  rows: Record<string, unknown>[];
+  /** Total number of rows returned. */
+  rowCount: number;
+}
+
 /** Query result as serialized Arrow IPC buffer. */
 export interface ArrowResult {
   /** Arrow IPC buffer containing the result data. */
@@ -121,6 +131,9 @@ export interface Connector {
 
   /** Execute a QueryIR and stream results as Arrow record batches. */
   stream(ir: QueryIR, options?: QueryOptions): AsyncIterable<ArrowRecordBatch>;
+
+  /** Execute a raw SQL query and return JSON rows. Optional — not all connectors support raw SQL. */
+  querySQL?(sql: string, params?: unknown[], options?: QueryOptions): Promise<JsonResult>;
 
   /** Check if the connection is alive. */
   healthCheck(): Promise<HealthCheckResult>;
