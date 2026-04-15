@@ -8,6 +8,7 @@ export type {
   ConnectorCapabilities,
   ConnectorConfig,
   HealthCheckResult,
+  JsonResult,
   QueryOptions,
   RelationshipMetadata,
   SchemaMetadata,

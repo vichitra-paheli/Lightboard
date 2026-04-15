@@ -5,7 +5,7 @@ import type { AgentTask, SubAgent, SubAgentConfig, SubAgentResult } from './type
 
 /**
  * Query specialist sub-agent.
- * Handles schema exploration and data retrieval via get_schema, execute_query, and run_sql.
+ * Handles schema exploration and data retrieval via get_schema, describe_table, and run_sql.
  * Receives full schema in task context. Does NOT create views — that is the ViewAgent's job.
  */
 export class QueryAgent implements SubAgent {

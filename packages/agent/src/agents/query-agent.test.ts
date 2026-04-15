@@ -39,16 +39,19 @@ function mockToolContext(): ToolContext {
         },
       ],
     }),
-    executeQuery: vi.fn().mockResolvedValue({
+    runSQL: vi.fn().mockResolvedValue({
       rows: [
         { region: 'North', total: 5000 },
         { region: 'South', total: 3200 },
       ],
       rowCount: 2,
     }),
-    runSQL: vi.fn().mockResolvedValue({
-      rows: [{ count: 42 }],
-      rowCount: 1,
+    describeTable: vi.fn().mockResolvedValue({
+      columns: [
+        { name: 'id', type: 'integer' },
+        { name: 'amount', type: 'numeric' },
+        { name: 'region', type: 'varchar' },
+      ],
     }),
   };
 }
@@ -93,7 +96,7 @@ describe('QueryAgent', () => {
     expect(agent.role).toBe('query');
     const toolNames = agent.tools.map((t) => t.name);
     expect(toolNames).toContain('get_schema');
-    expect(toolNames).toContain('execute_query');
+    expect(toolNames).toContain('describe_table');
     expect(toolNames).toContain('run_sql');
     expect(toolNames).not.toContain('create_view');
   });
@@ -116,28 +119,19 @@ describe('QueryAgent', () => {
     expect(result.explanation).toContain('orders table');
   });
 
-  it('executes execute_query tool and returns results', async () => {
+  it('executes run_sql tool and returns results', async () => {
     const ctx = mockToolContext();
     const agent = new QueryAgent({
       provider: mockProvider([
         [
-          { type: 'tool_call_start', id: 'tc_1', name: 'execute_query' },
+          { type: 'tool_call_start', id: 'tc_1', name: 'run_sql' },
           {
             type: 'tool_call_end',
             id: 'tc_1',
-            name: 'execute_query',
+            name: 'run_sql',
             input: {
               source_id: 'pg-main',
-              query_ir: {
-                source: 'pg-main',
-                table: 'orders',
-                select: [{ field: 'region' }],
-                aggregations: [{ function: 'sum', field: { field: 'amount' }, alias: 'total' }],
-                groupBy: [{ field: 'region' }],
-                orderBy: [],
-                joins: [],
-                limit: 100,
-              },
+              sql: 'SELECT region, SUM(amount) AS total FROM orders GROUP BY region LIMIT 100',
             },
           },
           { type: 'message_end', stopReason: 'tool_use' },
@@ -154,7 +148,7 @@ describe('QueryAgent', () => {
 
     expect(result.success).toBe(true);
     expect(result.data).toHaveProperty('rows');
-    expect(ctx.executeQuery).toHaveBeenCalled();
+    expect(ctx.runSQL).toHaveBeenCalled();
   });
 
   it('executes run_sql tool', async () => {
@@ -187,29 +181,29 @@ describe('QueryAgent', () => {
 
   it('handles tool errors and self-corrects', async () => {
     const ctx = mockToolContext();
-    (ctx.executeQuery as ReturnType<typeof vi.fn>)
+    (ctx.runSQL as ReturnType<typeof vi.fn>)
       .mockRejectedValueOnce(new Error('column "foo" does not exist'))
       .mockResolvedValueOnce({ rows: [{ count: 10 }], rowCount: 1 });
 
     const agent = new QueryAgent({
       provider: mockProvider([
         [
-          { type: 'tool_call_start', id: 'tc_1', name: 'execute_query' },
+          { type: 'tool_call_start', id: 'tc_1', name: 'run_sql' },
           {
             type: 'tool_call_end',
             id: 'tc_1',
-            name: 'execute_query',
-            input: { source_id: 'pg-main', query_ir: { source: 'pg-main', table: 'orders', select: [{ field: 'foo' }], aggregations: [], groupBy: [], orderBy: [], joins: [] } },
+            name: 'run_sql',
+            input: { source_id: 'pg-main', sql: 'SELECT foo FROM orders' },
           },
           { type: 'message_end', stopReason: 'tool_use' },
         ],
         [
-          { type: 'tool_call_start', id: 'tc_2', name: 'execute_query' },
+          { type: 'tool_call_start', id: 'tc_2', name: 'run_sql' },
           {
             type: 'tool_call_end',
             id: 'tc_2',
-            name: 'execute_query',
-            input: { source_id: 'pg-main', query_ir: { source: 'pg-main', table: 'orders', select: [{ field: 'region' }], aggregations: [], groupBy: [], orderBy: [], joins: [] } },
+            name: 'run_sql',
+            input: { source_id: 'pg-main', sql: 'SELECT region FROM orders' },
           },
           { type: 'message_end', stopReason: 'tool_use' },
         ],
@@ -224,7 +218,7 @@ describe('QueryAgent', () => {
     const result = await agent.run(makeTask('Get region data'));
 
     expect(result.success).toBe(true);
-    expect(ctx.executeQuery).toHaveBeenCalledTimes(2);
+    expect(ctx.runSQL).toHaveBeenCalledTimes(2);
   });
 
   it('returns failure when max rounds exceeded', async () => {
@@ -317,7 +311,7 @@ describe('QueryAgent', () => {
 
     const toolNames = (capturedTools as Array<{ name: string }>).map((t) => t.name);
     expect(toolNames).toContain('get_schema');
-    expect(toolNames).toContain('execute_query');
+    expect(toolNames).toContain('describe_table');
     expect(toolNames).toContain('run_sql');
     expect(toolNames).not.toContain('create_view');
     expect(toolNames).not.toContain('modify_view');

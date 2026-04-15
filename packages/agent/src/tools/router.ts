@@ -6,10 +6,10 @@ import type { ToolDefinition } from '../provider/types';
 export interface ToolContext {
   /** Get schema metadata for a data source. */
   getSchema: (sourceId: string) => Promise<Record<string, unknown>>;
-  /** Execute a query against a data source. */
-  executeQuery: (sourceId: string, queryIR: Record<string, unknown>) => Promise<Record<string, unknown>>;
-  /** Execute raw SQL against a data source (for complex joins). */
+  /** Execute raw SQL against a data source. */
   runSQL?: (sourceId: string, sql: string) => Promise<Record<string, unknown>>;
+  /** Describe a single table: columns, types, and sample rows. */
+  describeTable?: (sourceId: string, tableName: string) => Promise<Record<string, unknown>>;
   /** Get the current view state. */
   getCurrentView?: () => Record<string, unknown> | null;
   /** Execute DuckDB SQL on the session scratchpad for statistical analysis. */
@@ -27,25 +27,22 @@ const toolInputSchemas = {
   get_schema: z.object({
     source_id: z.string().min(1),
   }),
-  execute_query: z.object({
+  describe_table: z.object({
     source_id: z.string().min(1),
-    query_ir: z.record(z.unknown()),
+    table_name: z.string().min(1),
   }),
   create_view: z.object({
-    view_spec: z.object({
-      title: z.string().optional(),
-      description: z.string().optional(),
-      query: z.record(z.unknown()),
-      chart: z.object({
-        type: z.string(),
-        config: z.record(z.unknown()),
-      }),
-      controls: z.array(z.record(z.unknown())).optional(),
-    }),
+    title: z.string(),
+    description: z.string().optional(),
+    sql: z.string(),
+    html: z.string(),
   }),
   modify_view: z.object({
     view_id: z.string().min(1),
-    patch: z.record(z.unknown()),
+    title: z.string().optional(),
+    description: z.string().optional(),
+    sql: z.string().optional(),
+    html: z.string().optional(),
   }),
   run_sql: z.object({
     source_id: z.string().min(1),
@@ -71,7 +68,7 @@ export class ToolRouter {
     this.context = context;
     this.allowedTools = toolDefinitions
       ? new Set(toolDefinitions.map((t) => t.name))
-      : new Set(['get_schema', 'execute_query', 'run_sql', 'create_view', 'modify_view']);
+      : new Set(['get_schema', 'run_sql', 'describe_table', 'create_view', 'modify_view']);
   }
 
   /** Execute a tool call and return the result. Errors are returned, not thrown. */
@@ -95,8 +92,8 @@ export class ToolRouter {
       switch (toolName) {
         case 'get_schema':
           return await this.handleGetSchema(normalizedInput);
-        case 'execute_query':
-          return await this.handleExecuteQuery(normalizedInput);
+        case 'describe_table':
+          return await this.handleDescribeTable(normalizedInput);
         case 'run_sql':
           return await this.handleRunSQL(normalizedInput);
         case 'create_view':
@@ -130,21 +127,25 @@ export class ToolRouter {
     return { content: JSON.stringify(schema, null, 2), isError: false };
   }
 
-  /** Handle execute_query tool call. */
-  private async handleExecuteQuery(input: Record<string, unknown>): Promise<ToolExecutionResult> {
-    const parsed = toolInputSchemas.execute_query.safeParse(input);
+  /** Handle describe_table tool call — returns column details and sample rows. */
+  private async handleDescribeTable(input: Record<string, unknown>): Promise<ToolExecutionResult> {
+    const parsed = toolInputSchemas.describe_table.safeParse(input);
     if (!parsed.success) {
       return {
-        content: `Invalid input for execute_query. Expected: {"source_id": "<id>", "query_ir": {"source": "<id>", "table": "<name>", ...}}. Got: ${JSON.stringify(input).slice(0, 200)}. Error: ${parsed.error.message}`,
+        content: `Invalid input for describe_table. Expected: {"source_id": "<id>", "table_name": "<name>"}. Error: ${parsed.error.message}`,
         isError: true,
       };
     }
 
-    const result = await this.context.executeQuery(parsed.data.source_id, parsed.data.query_ir);
+    if (!this.context.describeTable) {
+      return { content: 'describe_table is not available', isError: true };
+    }
+
+    const result = await this.context.describeTable(parsed.data.source_id, parsed.data.table_name);
     return { content: JSON.stringify(result, null, 2), isError: false };
   }
 
-  /** Handle create_view tool call. */
+  /** Handle create_view tool call — stores an HTML view. */
   private async handleCreateView(input: Record<string, unknown>): Promise<ToolExecutionResult> {
     const parsed = toolInputSchemas.create_view.safeParse(input);
     if (!parsed.success) {
@@ -152,7 +153,12 @@ export class ToolRouter {
     }
 
     const viewId = `view_${Date.now()}`;
-    const viewSpec = parsed.data.view_spec;
+    const viewSpec = {
+      title: parsed.data.title,
+      description: parsed.data.description,
+      sql: parsed.data.sql,
+      html: parsed.data.html,
+    };
     this.viewStore.set(viewId, viewSpec);
 
     return {
@@ -161,7 +167,7 @@ export class ToolRouter {
     };
   }
 
-  /** Handle modify_view tool call. */
+  /** Handle modify_view tool call — patches an existing HTML view. */
   private async handleModifyView(input: Record<string, unknown>): Promise<ToolExecutionResult> {
     const parsed = toolInputSchemas.modify_view.safeParse(input);
     if (!parsed.success) {
@@ -173,7 +179,13 @@ export class ToolRouter {
       return { content: `View "${parsed.data.view_id}" not found`, isError: true };
     }
 
-    const updated = { ...existing, ...parsed.data.patch };
+    const patch: Record<string, unknown> = {};
+    if (parsed.data.title) patch.title = parsed.data.title;
+    if (parsed.data.description) patch.description = parsed.data.description;
+    if (parsed.data.sql) patch.sql = parsed.data.sql;
+    if (parsed.data.html) patch.html = parsed.data.html;
+
+    const updated = { ...existing, ...patch };
     this.viewStore.set(parsed.data.view_id, updated);
 
     return {

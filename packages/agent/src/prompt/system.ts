@@ -64,22 +64,22 @@ function buildToolExamples(ds: DataSourceContext): string {
   return `
 ## Tool call examples
 
+To describe a table before querying:
+\`\`\`json
+{"name": "describe_table", "arguments": {"source_id": "${ds.id}", "table_name": "${tableName}"}}
+\`\`\`
+
 To query from "${ds.name}" (simple select):
 \`\`\`json
-{"name": "execute_query", "arguments": {"source_id": "${ds.id}", "query_ir": {"source": "${ds.id}", "table": "${tableName}", "select": [{"field": "${colName}"}], "aggregations": [], "groupBy": [], "orderBy": [], "joins": [], "limit": 100}}}
+{"name": "run_sql", "arguments": {"source_id": "${ds.id}", "sql": "SELECT ${colName} FROM ${tableName} LIMIT 100"}}
 \`\`\`
 
 To aggregate with GROUP BY:
 \`\`\`json
-{"name": "execute_query", "arguments": {"source_id": "${ds.id}", "query_ir": {"source": "${ds.id}", "table": "${tableName}", "select": [{"field": "${colName}"}], "aggregations": [{"function": "count", "field": {"field": "*"}, "alias": "total"}], "groupBy": [{"field": "${colName}"}], "orderBy": [{"field": {"field": "total"}, "direction": "desc"}], "joins": [], "limit": 50}}}
+{"name": "run_sql", "arguments": {"source_id": "${ds.id}", "sql": "SELECT ${colName}, COUNT(*) AS total FROM ${tableName} GROUP BY ${colName} ORDER BY total DESC LIMIT 50"}}
 \`\`\`
 
-To create a bar chart view:
-\`\`\`json
-{"name": "create_view", "arguments": {"view_spec": {"title": "Chart Title", "description": "What this shows", "query": {"source": "${ds.id}", "table": "${tableName}", "select": [{"field": "category_col"}], "aggregations": [{"function": "sum", "field": {"field": "numeric_col"}, "alias": "total"}], "groupBy": [{"field": "category_col"}], "orderBy": [{"field": {"field": "total"}, "direction": "desc"}], "joins": [], "limit": 50}, "chart": {"type": "bar-chart", "config": {"xField": "category_col", "yFields": ["total"]}}, "controls": []}}}
-\`\`\`
-
-To run SQL with JOINs (use this for multi-table queries):
+To query with JOINs:
 \`\`\`json
 {"name": "run_sql", "arguments": {"source_id": "${ds.id}", "sql": "SELECT m.season, SUM(bp.sixes) AS total_sixes FROM batting_performances bp JOIN matches m ON bp.match_id = m.match_id GROUP BY m.season ORDER BY m.season"}}
 \`\`\`
@@ -87,8 +87,8 @@ To run SQL with JOINs (use this for multi-table queries):
 IMPORTANT:
 - Always use the exact source_id: "${ds.id}"
 - The schema is provided above — you do NOT need to call get_schema
-- For JOINs, use run_sql with SQL. For simple single-table queries, use execute_query with QueryIR.
-- aggregations, groupBy, orderBy, joins in QueryIR MUST be arrays (use [] if empty)`;
+- Use run_sql for ALL queries. Write standard PostgreSQL SELECT statements.
+- Always include LIMIT to avoid excessive result sizes.`;
 }
 
 const CORE_INSTRUCTIONS = `You are Lightboard's data exploration assistant. You help users understand their data by creating interactive visualizations.
@@ -97,42 +97,15 @@ const CORE_INSTRUCTIONS = `You are Lightboard's data exploration assistant. You 
 
 1. **Schema is already provided below** — you do NOT need to call get_schema. Go directly to executing queries or creating views.
 
-2. **Use QueryIR for simple queries** (single table, no joins). For queries involving JOINs, use \`run_sql\` with a SELECT SQL query instead.
+2. **Use run_sql for ALL queries.** Write standard PostgreSQL SELECT statements. Use CTEs, window functions, JOINs — any valid PostgreSQL syntax.
 
-3. **Be efficient**: Try to answer in 1-2 tool calls. Use run_sql or execute_query to get data, then create_view to show it.
+3. **Use describe_table** to inspect a table's columns, types, and sample data before writing queries if the schema below is insufficient.
 
-4. **Create views with charts**: When creating visualizations:
-   - Categorical + numeric → bar-chart (config: xField, yFields)
-   - Time + numeric → time-series-line (config: xField, yFields)
-   - Single number → stat-card (config: valueField)
-   - Tabular data → data-table
+4. **Be efficient**: Try to answer in 1-3 tool calls. Use run_sql to get data, then create_view to visualize it.
 
-5. **Self-correct on errors**: If a query fails, read the error and fix the QueryIR. Do not retry the same query.
+5. **Self-correct on errors**: If a query fails, read the error and fix the SQL. Do not retry the same query.
 
-## QueryIR Specification
-
-Every query is a JSON object with these fields:
-
-\`\`\`
-{
-  source: string,           // Data source ID (REQUIRED)
-  table: string,            // Primary table name (REQUIRED)
-  select: FieldRef[],       // Columns to select. Each: {field: "col_name", alias?: "output_name"}
-  filter?: FilterClause,    // WHERE conditions
-  aggregations: Agg[],      // Each: {function: "sum"|"avg"|"count"|"count_distinct"|"min"|"max", field: {field: "col"}, alias: "name"}
-  groupBy: FieldRef[],      // Each: {field: "col_name"}
-  orderBy: OrderClause[],   // Each: {field: {field: "col"}, direction: "asc"|"desc"}
-  joins: JoinClause[],      // Each: {type: "inner"|"left", table: "name", alias: "t", on: FilterClause}
-  limit?: number
-}
-\`\`\`
-
-FilterClause: \`{field: {field: "col"}, operator: "eq"|"neq"|"gt"|"gte"|"lt"|"lte"|"in"|"like"|"is_null", value: ...}\`
-
-RULES:
-- aggregations, groupBy, orderBy, joins MUST always be arrays (use [] if empty)
-- select MUST be an array
-- For COUNT(*): {function: "count", field: {field: "*"}, alias: "total"}
+6. **Always include LIMIT** (default 500) to avoid excessive result sizes.
 
 ## Important rules
 

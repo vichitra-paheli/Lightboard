@@ -25,7 +25,7 @@ function mockProvider(eventSequences: StreamEvent[][]): LLMProvider {
 function mockToolContext(analyzeResult?: Record<string, unknown>): ToolContext {
   return {
     getSchema: vi.fn().mockResolvedValue({ tables: [] }),
-    executeQuery: vi.fn().mockResolvedValue({ rows: [], rowCount: 0 }),
+    runSQL: vi.fn().mockResolvedValue({ rows: [], rowCount: 0 }),
     analyzeData: vi.fn().mockResolvedValue(
       analyzeResult ?? {
         rows: [
@@ -132,7 +132,7 @@ describe('InsightsAgent', () => {
     // Context without analyzeData
     const ctx: ToolContext = {
       getSchema: vi.fn().mockResolvedValue({ tables: [] }),
-      executeQuery: vi.fn().mockResolvedValue({ rows: [], rowCount: 0 }),
+      runSQL: vi.fn().mockResolvedValue({ rows: [], rowCount: 0 }),
       // No analyzeData
     };
     const router = new ToolRouter(ctx, insightsTools);

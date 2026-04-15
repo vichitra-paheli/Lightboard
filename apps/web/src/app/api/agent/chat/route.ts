@@ -3,7 +3,6 @@ import { getAdminDb, withAuth } from '@/lib/auth';
 import {
   getDataSourceConnection,
   introspectSchema,
-  executeQueryIR,
   executeRawSQL,
   DataSourceError,
 } from '@/lib/data-source-service';
@@ -139,26 +138,29 @@ export const POST = withAuth(async (req, { db, orgId }) => {
       const schema = await introspectSchema(connection);
       return schema as unknown as Record<string, unknown>;
     },
-    executeQuery: async (srcId: string, rawQueryIR: Record<string, unknown> | string) => {
-      // Local models sometimes send queryIR as a JSON string — parse it
-      let queryIR: Record<string, unknown>;
-      if (typeof rawQueryIR === 'string') {
-        try {
-          queryIR = JSON.parse(rawQueryIR) as Record<string, unknown>;
-        } catch {
-          throw new DataSourceError('Invalid QueryIR: received string that is not valid JSON', 'validation');
-        }
-      } else {
-        queryIR = rawQueryIR;
-      }
-      const connection = await getDataSourceConnection(adminDb, orgId, srcId);
-      const result = await executeQueryIR(connection, queryIR);
-      return result as unknown as Record<string, unknown>;
-    },
     runSQL: async (srcId: string, sql: string) => {
       const connection = await getDataSourceConnection(adminDb, orgId, srcId);
       const result = await executeRawSQL(connection, sql);
       return result as unknown as Record<string, unknown>;
+    },
+    describeTable: async (srcId: string, tableName: string) => {
+      const connection = await getDataSourceConnection(adminDb, orgId, srcId);
+      const schema = await introspectSchema(connection);
+      const schemaObj = schema as { tables?: Array<{ name: string; columns: unknown[] }> };
+      const table = schemaObj.tables?.find((t) => t.name === tableName);
+      if (!table) {
+        throw new DataSourceError(`Table "${tableName}" not found`, 'not_found');
+      }
+      // Get sample rows
+      const sampleResult = await executeRawSQL(
+        connection,
+        `SELECT * FROM "${tableName}" LIMIT 5`,
+      );
+      return {
+        table: tableName,
+        columns: table.columns,
+        sampleRows: (sampleResult as { rows?: unknown[] }).rows ?? [],
+      } as unknown as Record<string, unknown>;
     },
   };
 
@@ -241,8 +243,8 @@ async function handleNonStreaming(
             } catch { /* ignore parse errors */ }
           }
 
-          // Extract query results from execute_query
-          if (event.name === 'execute_query' && !event.isError) {
+          // Extract query results from run_sql
+          if (event.name === 'run_sql' && !event.isError) {
             try {
               queryResult = JSON.parse(event.result);
             } catch { /* ignore parse errors */ }

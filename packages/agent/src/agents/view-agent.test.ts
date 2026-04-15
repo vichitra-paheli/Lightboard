@@ -24,7 +24,7 @@ function mockProvider(eventSequences: StreamEvent[][]): LLMProvider {
 function mockToolContext(): ToolContext {
   return {
     getSchema: vi.fn().mockResolvedValue({ tables: [] }),
-    executeQuery: vi.fn().mockResolvedValue({ rows: [], rowCount: 0 }),
+    runSQL: vi.fn().mockResolvedValue({ rows: [], rowCount: 0 }),
   };
 }
 
@@ -104,16 +104,10 @@ describe('ViewAgent', () => {
             id: 'tc_1',
             name: 'create_view',
             input: {
-              view_spec: {
-                title: 'Sales by Region',
-                description: 'Bar chart of total sales per region',
-                query: { source: 'pg-main', table: 'sales' },
-                chart: {
-                  type: 'bar-chart',
-                  config: { xField: 'region', yFields: ['total_sales'] },
-                },
-                controls: [],
-              },
+              title: 'Sales by Region',
+              description: 'Bar chart of total sales per region',
+              sql: 'SELECT region, SUM(amount) AS total_sales FROM sales GROUP BY region',
+              html: '<html><body><canvas id="chart"></canvas></body></html>',
             },
           },
           { type: 'message_end', stopReason: 'tool_use' },
@@ -140,11 +134,9 @@ describe('ViewAgent', () => {
 
     // Pre-create a view in the router's store
     await router.execute('create_view', {
-      view_spec: {
-        title: 'Original',
-        query: { source: 'pg-main', table: 'sales' },
-        chart: { type: 'bar-chart', config: {} },
-      },
+      title: 'Original',
+      sql: 'SELECT * FROM sales',
+      html: '<html><body>original</body></html>',
     });
 
     const agent = new ViewAgent({
@@ -158,7 +150,7 @@ describe('ViewAgent', () => {
             name: 'modify_view',
             input: {
               view_id: 'nonexistent_view',
-              patch: { chart: { type: 'time-series-line', config: { xField: 'date', yFields: ['total'] } } },
+              html: '<html><body>updated</body></html>',
             },
           },
           { type: 'message_end', stopReason: 'tool_use' },
@@ -193,10 +185,9 @@ describe('ViewAgent', () => {
           id: 'tc',
           name: 'create_view',
           input: {
-            view_spec: {
-              query: { source: 'x', table: 'y' },
-              chart: { type: 'bar-chart', config: {} },
-            },
+            title: 'Loop Chart',
+            sql: 'SELECT * FROM y',
+            html: '<html><body>chart</body></html>',
           },
         };
         yield { type: 'message_end' as const, stopReason: 'tool_use' };

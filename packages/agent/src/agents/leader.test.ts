@@ -33,11 +33,10 @@ function mockToolContext(): ToolContext {
     getSchema: vi.fn().mockResolvedValue({
       tables: [{ name: 'orders', columns: [{ name: 'id', type: 'integer' }] }],
     }),
-    executeQuery: vi.fn().mockResolvedValue({
+    runSQL: vi.fn().mockResolvedValue({
       rows: [{ region: 'North', total: 5000 }],
       rowCount: 1,
     }),
-    runSQL: vi.fn().mockResolvedValue({ rows: [{ count: 42 }], rowCount: 1 }),
     analyzeData: vi.fn().mockResolvedValue({
       rows: [{ avg_sales: 5000, stddev: 1200 }],
       rowCount: 1,
@@ -79,7 +78,7 @@ describe('LeaderAgent', () => {
   });
 
   it('delegates to QueryAgent and emits agent_start/agent_end', async () => {
-    // Leader calls delegate_query, then sub-agent internally calls execute_query
+    // Leader calls delegate_query, then sub-agent internally calls run_sql
     const leader = new LeaderAgent({
       provider: mockProvider([
         // Round 1: Leader calls delegate_query
@@ -99,11 +98,11 @@ describe('LeaderAgent', () => {
         ],
         // Sub-agent's internal LLM call (QueryAgent uses same provider)
         [
-          { type: 'tool_call_start', id: 'sub_1', name: 'execute_query' },
+          { type: 'tool_call_start', id: 'sub_1', name: 'run_sql' },
           {
             type: 'tool_call_end',
             id: 'sub_1',
-            name: 'execute_query',
+            name: 'run_sql',
             input: {
               source_id: 'pg-main',
               query_ir: { source: 'pg-main', table: 'orders', select: [{ field: 'region' }], aggregations: [], groupBy: [], orderBy: [], joins: [] },
@@ -170,7 +169,7 @@ describe('LeaderAgent', () => {
             type: 'tool_call_end',
             id: 'v1',
             name: 'create_view',
-            input: { view_spec: { query: { source: 'x', table: 'y' }, chart: { type: 'bar-chart', config: {} } } },
+            input: { title: 'Sales Chart', sql: 'SELECT * FROM orders', html: '<html><body>chart</body></html>' },
           },
           { type: 'message_end', stopReason: 'tool_use' },
         ],
@@ -274,7 +273,7 @@ describe('LeaderAgent', () => {
 
   it('handles sub-agent errors gracefully', async () => {
     const ctx = mockToolContext();
-    (ctx.executeQuery as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('Connection refused'));
+    (ctx.runSQL as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('Connection refused'));
 
     const leader = new LeaderAgent({
       provider: mockProvider([
@@ -289,13 +288,13 @@ describe('LeaderAgent', () => {
           },
           { type: 'message_end', stopReason: 'tool_use' },
         ],
-        // Sub-agent tries execute_query, fails
+        // Sub-agent tries run_sql, fails
         [
-          { type: 'tool_call_start', id: 's1', name: 'execute_query' },
+          { type: 'tool_call_start', id: 's1', name: 'run_sql' },
           {
             type: 'tool_call_end',
             id: 's1',
-            name: 'execute_query',
+            name: 'run_sql',
             input: { source_id: 'broken', query_ir: { source: 'broken', table: 'x', select: [], aggregations: [], groupBy: [], orderBy: [], joins: [] } },
           },
           { type: 'message_end', stopReason: 'tool_use' },
@@ -362,14 +361,14 @@ describe('LeaderAgent', () => {
           },
           { type: 'message_end', stopReason: 'tool_use' },
         ],
-        // QueryAgent internal: execute_query
+        // QueryAgent internal: run_sql
         [
-          { type: 'tool_call_start', id: 's1', name: 'execute_query' },
+          { type: 'tool_call_start', id: 's1', name: 'run_sql' },
           {
             type: 'tool_call_end',
             id: 's1',
-            name: 'execute_query',
-            input: { source_id: 'pg-main', query_ir: { source: 'pg-main', table: 'orders', select: [{ field: 'region' }], aggregations: [], groupBy: [], orderBy: [], joins: [] } },
+            name: 'run_sql',
+            input: { source_id: 'pg-main', sql: 'SELECT region FROM orders' },
           },
           { type: 'message_end', stopReason: 'tool_use' },
         ],
