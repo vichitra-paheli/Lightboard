@@ -60,6 +60,27 @@ export const agentTools: ToolDefinition[] = [
     },
   },
   {
+    name: 'update_schema_notes',
+    description:
+      'Append a note to the schema documentation for this data source. ' +
+      'Use this when you discover something useful about the schema: a join pattern, a gotcha, ' +
+      'a column meaning, or a query pattern that works well. These notes persist across conversations.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        source_id: {
+          type: 'string',
+          description: 'The data source to annotate',
+        },
+        note: {
+          type: 'string',
+          description: 'The note to append (markdown). E.g. "### Gotcha\\nmatches.series is often NULL for IPL — use training_data.match_format instead."',
+        },
+      },
+      required: ['source_id', 'note'],
+    },
+  },
+  {
     name: 'create_view',
     description:
       'Create a visualization from query results. ' +

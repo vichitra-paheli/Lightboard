@@ -1,3 +1,6 @@
+import type { SchemaContext } from '../bootstrap';
+import { renderSchemaContext } from '../bootstrap';
+
 /**
  * Data source context with schema for building the query agent's system prompt.
  * Mirrors the shape used by the main system prompt builder.
@@ -6,6 +9,8 @@ interface DataSourceContext {
   id: string;
   name: string;
   type: string;
+  schemaDoc?: string | null;
+  schemaContext?: SchemaContext | null;
   cachedSchema?: {
     tables: {
       name: string;
@@ -17,8 +22,7 @@ interface DataSourceContext {
 
 /**
  * Builds a focused system prompt for the Query Agent specialist.
- * Contains schema details and QueryIR specification — no chart or view knowledge.
- * Designed to stay under ~2K tokens for efficient context usage.
+ * Contains enriched schema details — no chart or view knowledge.
  */
 export function buildQueryPrompt(context: {
   dataSources: DataSourceContext[];
@@ -28,7 +32,11 @@ export function buildQueryPrompt(context: {
   for (const ds of context.dataSources) {
     parts.push(`\n### Data Source: "${ds.name}" (id: "${ds.id}", type: ${ds.type})`);
 
-    if (ds.cachedSchema && ds.cachedSchema.tables.length > 0) {
+    if (ds.schemaDoc) {
+      parts.push(ds.schemaDoc);
+    } else if (ds.schemaContext) {
+      parts.push(renderSchemaContext(ds.schemaContext));
+    } else if (ds.cachedSchema && ds.cachedSchema.tables.length > 0) {
       parts.push('Tables:');
       for (const table of ds.cachedSchema.tables) {
         const cols = table.columns

@@ -1,8 +1,16 @@
+import type { SchemaContext } from '../bootstrap';
+import { renderSchemaContext } from '../bootstrap';
+
 /** Data source info with optional cached schema for the system prompt. */
 interface DataSourceContext {
   id: string;
   name: string;
   type: string;
+  /** Curated schema document (highest priority — human-written or agent-refined). */
+  schemaDoc?: string | null;
+  /** Enriched schema context from bootstrap (second priority). */
+  schemaContext?: SchemaContext | null;
+  /** Legacy basic schema (fallback). */
   cachedSchema?: {
     tables: {
       name: string;
@@ -28,7 +36,14 @@ export function buildSystemPrompt(context: {
     for (const ds of context.dataSources) {
       parts.push(`\n### Data Source: "${ds.name}" (id: "${ds.id}", type: ${ds.type})`);
 
-      if (ds.cachedSchema && ds.cachedSchema.tables.length > 0) {
+      if (ds.schemaDoc) {
+        // Curated schema document — highest quality context
+        parts.push(ds.schemaDoc);
+      } else if (ds.schemaContext) {
+        // Enriched schema with row counts, sample values, relationships
+        parts.push(renderSchemaContext(ds.schemaContext));
+      } else if (ds.cachedSchema && ds.cachedSchema.tables.length > 0) {
+        // Fallback: basic column listing
         parts.push('Tables:');
         for (const table of ds.cachedSchema.tables) {
           const cols = table.columns

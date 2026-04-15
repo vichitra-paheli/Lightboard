@@ -9,14 +9,16 @@ import {
 import { checkRateLimit, addRateLimitHeaders } from '@/lib/rate-limit';
 import { redis } from '@/lib/redis';
 import { dataSources } from '@lightboard/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import {
   LeaderAgent,
   ScratchpadManager,
   LLMError,
+  generateSchemaContext,
   type AgentDataSource,
   type AgentEvent,
   type Message,
+  type SchemaContext,
   type ToolContext,
 } from '@lightboard/agent';
 import { resolveAIProvider } from '@/lib/ai-provider';
@@ -118,21 +120,44 @@ export const POST = withAuth(async (req, { db, orgId }) => {
     .from(dataSources)
     .where(eq(dataSources.orgId, orgId));
 
-  const agentDataSources: AgentDataSource[] = orgSources.map((s) => {
+  // Build agent data sources, generating enriched schema context if not cached
+  const adminDb = getAdminDb();
+  const agentDataSources: AgentDataSource[] = [];
+  for (const s of orgSources) {
     const config = s.config as Record<string, unknown> | null;
-    return {
+    let schemaContext = (config?.schemaContext as SchemaContext) ?? null;
+
+    // Generate schema context on first use if missing
+    if (!schemaContext) {
+      try {
+        const connection = await getDataSourceConnection(adminDb, orgId, s.id);
+        console.log(`[Chat] Bootstrapping schema context for "${s.name}"...`);
+        const start = performance.now();
+        schemaContext = await generateSchemaContext(connection);
+        console.log(`[Chat] Schema bootstrap complete (${Math.round(performance.now() - start)}ms, ${schemaContext.tables.length} tables)`);
+
+        // Cache it back to the data source config for future requests
+        const updatedConfig = { ...(config ?? {}), schemaContext };
+        await db
+          .update(dataSources)
+          .set({ config: updatedConfig, updatedAt: new Date() })
+          .where(eq(dataSources.id, s.id));
+      } catch (err) {
+        console.error(`[Chat] Schema bootstrap failed for "${s.name}":`, err instanceof Error ? err.message : err);
+      }
+    }
+
+    agentDataSources.push({
       id: s.id,
       name: s.name,
       type: s.type,
+      schemaDoc: (config?.schemaDoc as string) ?? null,
+      schemaContext: schemaContext as unknown as Record<string, unknown> | null,
       cachedSchema: (config?.cachedSchema as Record<string, unknown>) ?? null,
-    };
-  });
+    });
+  }
 
   // Build ToolContext with real data source operations
-  // Use adminDb instead of the RLS-scoped pool client because the SSE streaming
-  // path runs asynchronously after withAuth releases the pool client.
-  // getDataSourceConnection already filters by orgId explicitly.
-  const adminDb = getAdminDb();
   const toolContext: ToolContext = {
     getSchema: async (srcId: string) => {
       const connection = await getDataSourceConnection(adminDb, orgId, srcId);
@@ -163,6 +188,24 @@ export const POST = withAuth(async (req, { db, orgId }) => {
         sampleRows: (sampleResult as { rows?: unknown[] }).rows ?? [],
       } as unknown as Record<string, unknown>;
     },
+    updateSchemaNotes: async (srcId: string, note: string) => {
+      const [source] = await db
+        .select({ config: dataSources.config })
+        .from(dataSources)
+        .where(and(eq(dataSources.id, srcId), eq(dataSources.orgId, orgId)));
+      if (!source) throw new DataSourceError('Data source not found', 'not_found');
+
+      const config = (source.config as Record<string, unknown>) ?? {};
+      const existingDoc = (config.schemaDoc as string) ?? '';
+      const updatedDoc = existingDoc
+        ? `${existingDoc}\n\n### Agent Notes\n\n${note}`
+        : `### Agent Notes\n\n${note}`;
+      await db
+        .update(dataSources)
+        .set({ config: { ...config, schemaDoc: updatedDoc }, updatedAt: new Date() })
+        .where(eq(dataSources.id, srcId));
+      console.log(`[Chat] Schema note saved for source ${srcId}: ${note.slice(0, 100)}`);
+    },
   };
 
   // Generate or reuse conversation/session ID
@@ -181,6 +224,8 @@ export const POST = withAuth(async (req, { db, orgId }) => {
       toolContext,
       dataSources: agentDataSources,
       scratchpadManager,
+      maxToolRounds: 25,
+      subAgentMaxRounds: 15,
     });
 
     // Load conversation history from Redis for cold-start recovery
@@ -368,15 +413,19 @@ function handleStreaming(
                 if (!event.isError) {
                   try {
                     const parsed = JSON.parse(event.result);
+                    console.log(`[Chat] Tool result for ${event.name}: keys=${Object.keys(parsed).join(',')}`);
                     // Direct create_view/modify_view (single-agent path)
                     if ((event.name === 'create_view' || event.name === 'modify_view') && parsed.viewSpec) {
+                      console.log(`[Chat] Emitting view_created (direct), html=${parsed.viewSpec.html?.length ?? 0} chars`);
                       enqueue('view_created', { viewSpec: parsed.viewSpec });
                     }
                     // delegate_view (multi-agent path) — ViewSpec is in the sub-agent result
-                    if (event.name === 'delegate_view' && parsed.viewSpec) {
-                      enqueue('view_created', { viewSpec: parsed.viewSpec });
-                    } else if (event.name === 'delegate_view' && parsed.viewId) {
-                      enqueue('view_created', { viewSpec: parsed });
+                    if (event.name === 'delegate_view') {
+                      const viewSpec = parsed.viewSpec ?? parsed;
+                      if (viewSpec.html || viewSpec.viewId) {
+                        console.log(`[Chat] Emitting view_created (delegate), html=${viewSpec.html?.length ?? 0} chars`);
+                        enqueue('view_created', { viewSpec });
+                      }
                     }
                   } catch { /* ignore parse errors */ }
                 }

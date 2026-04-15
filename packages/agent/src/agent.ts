@@ -19,6 +19,11 @@ export interface AgentDataSource {
   id: string;
   name: string;
   type: string;
+  /** Curated schema document — human-written or agent-refined markdown. */
+  schemaDoc?: string | null;
+  /** Enriched schema context from bootstrap. */
+  schemaContext?: Record<string, unknown> | null;
+  /** Legacy basic schema (fallback). */
   cachedSchema?: Record<string, unknown> | null;
 }
 
