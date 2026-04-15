@@ -79,35 +79,63 @@ export class ToolRouter {
 
     // Auto-parse stringified JSON values — local models often send nested objects as strings
     const normalizedInput = this.normalizeInput(input);
-    // Debug: log normalization for troubleshooting local model issues
     for (const [key, val] of Object.entries(input)) {
       if (typeof val === 'string' && typeof normalizedInput[key] !== 'string') {
         console.log(`[ToolRouter] Normalized "${key}" from string to ${typeof normalizedInput[key]}`);
       }
-      if (typeof val === 'string' && typeof normalizedInput[key] === 'string' && val.includes('{')) {
-        console.log(`[ToolRouter] WARNING: "${key}" is still a string after normalization. First 100 chars: ${val.slice(0, 100)}`);
-      }
     }
+
+    // Log raw input for debugging
+    console.log(`[ToolRouter] Raw input: ${JSON.stringify(normalizedInput).slice(0, 300)}`);
+
+    // Log tool call with compact input summary
+    const inputSummary = toolName === 'run_sql'
+      ? `sql=${JSON.stringify((normalizedInput as Record<string, unknown>).sql)}`
+      : toolName === 'create_view'
+        ? `title=${JSON.stringify((normalizedInput as Record<string, unknown>).title)}, html=${((normalizedInput as Record<string, unknown>).html as string)?.length ?? 0} chars`
+        : toolName === 'describe_table'
+          ? `table=${(normalizedInput as Record<string, unknown>).table_name}`
+          : JSON.stringify(normalizedInput).slice(0, 150);
+    console.log(`[ToolRouter] ▶ ${toolName}(${inputSummary})`);
+    const start = performance.now();
+
     try {
+      let result: ToolExecutionResult;
       switch (toolName) {
         case 'get_schema':
-          return await this.handleGetSchema(normalizedInput);
+          result = await this.handleGetSchema(normalizedInput);
+          break;
         case 'describe_table':
-          return await this.handleDescribeTable(normalizedInput);
+          result = await this.handleDescribeTable(normalizedInput);
+          break;
         case 'run_sql':
-          return await this.handleRunSQL(normalizedInput);
+          result = await this.handleRunSQL(normalizedInput);
+          break;
         case 'create_view':
-          return await this.handleCreateView(normalizedInput);
+          result = await this.handleCreateView(normalizedInput);
+          break;
         case 'modify_view':
-          return await this.handleModifyView(normalizedInput);
+          result = await this.handleModifyView(normalizedInput);
+          break;
         case 'analyze_data':
-          return await this.handleAnalyzeData(normalizedInput);
+          result = await this.handleAnalyzeData(normalizedInput);
+          break;
         default:
           return { content: `Unknown tool: ${toolName}`, isError: true };
       }
+
+      const elapsed = Math.round(performance.now() - start);
+      const resultPreview = result.isError
+        ? result.content.slice(0, 200)
+        : `${result.content.length} chars`;
+      console.log(`[ToolRouter] ${result.isError ? '✗' : '✓'} ${toolName} (${elapsed}ms) → ${resultPreview}`);
+      return result;
     } catch (err) {
+      const elapsed = Math.round(performance.now() - start);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error(`[ToolRouter] ✗ ${toolName} (${elapsed}ms) threw: ${errMsg}`);
       return {
-        content: `Tool "${toolName}" failed: ${err instanceof Error ? err.message : String(err)}`,
+        content: `Tool "${toolName}" failed: ${errMsg}`,
         isError: true,
       };
     }

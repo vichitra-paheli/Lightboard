@@ -87,6 +87,8 @@ export const POST = withAuth(async (req, { db, orgId }) => {
     return NextResponse.json({ error: 'Message is required' }, { status: 400 });
   }
 
+  console.log(`[Chat] ← "${message.slice(0, 100)}" (conv=${conversationId ?? 'new'}, org=${orgId})`);
+
   // Rate limiting
   const rateResult = await checkRateLimit(orgId, AGENT_RATE_LIMIT_BUCKET);
   if (!rateResult.allowed) {
@@ -196,6 +198,7 @@ export const POST = withAuth(async (req, { db, orgId }) => {
   const acceptHeader = req.headers.get('Accept') ?? '';
   const wantsStream = acceptHeader.includes('text/event-stream');
 
+  console.log(`[Chat] Mode: ${wantsStream ? 'SSE streaming' : 'JSON'}, session=${sessionId}`);
   if (wantsStream) {
     return handleStreaming(leader, message, orgId, sessionId);
   }
@@ -256,6 +259,9 @@ async function handleNonStreaming(
     // Save conversation to Redis
     const updatedHistory = leader.getHistory();
     await saveConversation(orgId, sessionId, updatedHistory);
+
+    const toolSummary = toolCalls.map((t) => `${t.name}:${t.status}`).join(', ');
+    console.log(`[Chat] → ${text.length}c text, tools=[${toolSummary}], view=${viewSpec ? 'yes' : 'no'}`);
 
     return NextResponse.json({
       conversationId: sessionId,

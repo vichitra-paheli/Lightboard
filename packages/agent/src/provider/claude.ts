@@ -38,9 +38,13 @@ export class ClaudeProvider implements LLMProvider {
       input_schema: t.inputSchema as Anthropic.Tool['input_schema'],
     }));
 
+    const model = options?.model ?? this.defaultModel;
+    const msgSummary = messages.map((m) => `${m.role}:${(m.content as string)?.length ?? 0}c`);
+    console.log(`[Claude] Request: model=${model}, msgs=[${msgSummary.join(', ')}], tools=[${tools.map(t => t.name).join(', ')}]`);
+
     try {
       const stream = this.client.messages.stream({
-        model: options?.model ?? this.defaultModel,
+        model,
         max_tokens: options?.maxTokens ?? this.defaultMaxTokens,
         temperature: options?.temperature,
         system: options?.system,
@@ -48,8 +52,63 @@ export class ClaudeProvider implements LLMProvider {
         tools: anthropicTools.length > 0 ? anthropicTools : undefined,
       });
 
+      // Track active tool call for correlating deltas with content_block_stop
+      let activeToolId = '';
+      let activeToolName = '';
+      let activeToolInput = '';
+
       for await (const event of stream) {
-        yield* this.convertStreamEvent(event);
+        switch (event.type) {
+          case 'content_block_start':
+            if (event.content_block.type === 'tool_use') {
+              activeToolId = event.content_block.id;
+              activeToolName = event.content_block.name;
+              activeToolInput = '';
+              yield {
+                type: 'tool_call_start' as const,
+                id: event.content_block.id,
+                name: event.content_block.name,
+              };
+            }
+            break;
+
+          case 'content_block_delta':
+            if (event.delta.type === 'text_delta') {
+              yield { type: 'text_delta' as const, text: event.delta.text };
+            } else if (event.delta.type === 'input_json_delta') {
+              activeToolInput += event.delta.partial_json;
+              yield {
+                type: 'tool_call_delta' as const,
+                id: activeToolId,
+                input: event.delta.partial_json,
+              };
+            }
+            break;
+
+          case 'content_block_stop':
+            if (activeToolId) {
+              let parsed: Record<string, unknown> = {};
+              try {
+                parsed = JSON.parse(activeToolInput) as Record<string, unknown>;
+              } catch {
+                console.error(`[Claude] Failed to parse tool input for ${activeToolName}: ${activeToolInput.slice(0, 200)}`);
+              }
+              yield {
+                type: 'tool_call_end' as const,
+                id: activeToolId,
+                name: activeToolName,
+                input: parsed,
+              };
+              activeToolId = '';
+              activeToolName = '';
+              activeToolInput = '';
+            }
+            break;
+
+          case 'message_stop':
+            yield { type: 'message_end' as const, stopReason: 'end_turn' };
+            break;
+        }
       }
     } catch (err) {
       if (err instanceof Anthropic.APIError) {
@@ -108,34 +167,4 @@ export class ClaudeProvider implements LLMProvider {
     return result;
   }
 
-  /** Converts Anthropic stream events to our StreamEvent format. */
-  private *convertStreamEvent(event: Anthropic.MessageStreamEvent): Iterable<StreamEvent> {
-    switch (event.type) {
-      case 'content_block_start':
-        if (event.content_block.type === 'tool_use') {
-          yield {
-            type: 'tool_call_start',
-            id: event.content_block.id,
-            name: event.content_block.name,
-          };
-        }
-        break;
-
-      case 'content_block_delta':
-        if (event.delta.type === 'text_delta') {
-          yield { type: 'text_delta', text: event.delta.text };
-        } else if (event.delta.type === 'input_json_delta') {
-          yield {
-            type: 'tool_call_delta',
-            id: '', // Anthropic doesn't include id in deltas
-            input: event.delta.partial_json,
-          };
-        }
-        break;
-
-      case 'message_stop':
-        yield { type: 'message_end', stopReason: 'end_turn' };
-        break;
-    }
-  }
 }
