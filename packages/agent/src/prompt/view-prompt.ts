@@ -30,7 +30,7 @@ Use create_view with:
 
 ## HTML Requirements
 
-1. **Data**: Embed the query results as \`const DATA = [...];\` in a <script> tag.
+1. **Data**: You MUST embed the actual query result rows directly as a JSON array literal: \`const DATA = [{...}, {...}, ...];\`. Do NOT use template variables like \${DATA} — the data must be hardcoded in the HTML string.
 2. **Charts**: Use Chart.js from CDN (\`https://cdn.jsdelivr.net/npm/chart.js\`) or pure SVG. Choose the best chart type for the data.
 3. **Layout**: Responsive, centered, max-width 900px. Use CSS Grid or Flexbox for multi-panel layouts.
 4. **Theme**: Dark background (#0a0a0f), light text (#e4e4e7), accent colors from this palette: #6366f1 (indigo), #22d3ee (cyan), #f59e0b (amber), #10b981 (emerald), #f43f5e (rose), #a855f7 (purple).

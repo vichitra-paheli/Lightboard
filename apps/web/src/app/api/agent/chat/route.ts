@@ -56,7 +56,7 @@ if (typeof leaderCleanupInterval === 'object' && 'unref' in leaderCleanupInterva
 }
 
 /** Maximum duration for agent processing in milliseconds. */
-const AGENT_TIMEOUT_MS = 300_000;
+const AGENT_TIMEOUT_MS = 600_000;
 
 /** Redis TTL for conversation sessions in seconds. */
 const CONVERSATION_TTL_SEC = 3600;
