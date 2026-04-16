@@ -176,7 +176,8 @@ describe('QueryAgent', () => {
     const result = await agent.run(makeTask('Count all orders'));
 
     expect(result.success).toBe(true);
-    expect(ctx.runSQL).toHaveBeenCalledWith('pg-main', 'SELECT COUNT(*) as count FROM orders');
+    // Router auto-appends LIMIT so the connector always sees a capped statement.
+    expect(ctx.runSQL).toHaveBeenCalledWith('pg-main', 'SELECT COUNT(*) as count FROM orders LIMIT 500');
   });
 
   it('handles tool errors and self-corrects', async () => {

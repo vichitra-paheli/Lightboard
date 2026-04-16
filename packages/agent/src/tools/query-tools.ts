@@ -1,5 +1,7 @@
 import type { ToolDefinition } from '../provider/types';
 
+import { DEFAULT_ROW_LIMIT } from './constants';
+
 /**
  * Tool definitions for the Query Agent specialist.
  * These tools focus on schema exploration and data retrieval via raw SQL.
@@ -46,7 +48,8 @@ export const queryTools: ToolDefinition[] = [
     description:
       'Execute a read-only SELECT SQL query against a data source. ' +
       'This is the primary tool for retrieving data. Write standard PostgreSQL SELECT statements. ' +
-      'Only SELECT queries are allowed. Results are limited to 500 rows.',
+      `Only SELECT queries are allowed. Results are capped at ${DEFAULT_ROW_LIMIT} rows — ` +
+      `the router appends \`LIMIT ${DEFAULT_ROW_LIMIT}\` automatically if you omit one.`,
     inputSchema: {
       type: 'object',
       properties: {

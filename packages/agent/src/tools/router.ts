@@ -2,6 +2,8 @@ import { z } from 'zod';
 
 import type { ToolDefinition } from '../provider/types';
 
+import { DEFAULT_ROW_LIMIT, ensureLimit } from './constants';
+
 /** Context provided to tool handlers for accessing services. */
 export interface ToolContext {
   /** Get schema metadata for a data source. */
@@ -254,7 +256,10 @@ export class ToolRouter {
       return { content: 'run_sql is not available', isError: true };
     }
 
-    const result = await this.context.runSQL(parsed.data.source_id, parsed.data.sql);
+    // Guarantee a row cap regardless of what the model emitted. The tool
+    // description promises 500 rows — this is what makes that promise true.
+    const safeSql = ensureLimit(parsed.data.sql, DEFAULT_ROW_LIMIT);
+    const result = await this.context.runSQL(parsed.data.source_id, safeSql);
     return { content: JSON.stringify(result, null, 2), isError: false };
   }
 
