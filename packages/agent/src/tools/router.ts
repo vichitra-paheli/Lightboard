@@ -10,6 +10,8 @@ export interface ToolContext {
   runSQL?: (sourceId: string, sql: string) => Promise<Record<string, unknown>>;
   /** Describe a single table: columns, types, and sample rows. */
   describeTable?: (sourceId: string, tableName: string) => Promise<Record<string, unknown>>;
+  /** Append a note to the schema documentation for a data source. */
+  updateSchemaNotes?: (sourceId: string, note: string) => Promise<void>;
   /** Get the current view state. */
   getCurrentView?: () => Record<string, unknown> | null;
   /** Execute DuckDB SQL on the session scratchpad for statistical analysis. */
@@ -30,6 +32,10 @@ const toolInputSchemas = {
   describe_table: z.object({
     source_id: z.string().min(1),
     table_name: z.string().min(1),
+  }),
+  update_schema_notes: z.object({
+    source_id: z.string().min(1),
+    note: z.string().min(1),
   }),
   create_view: z.object({
     title: z.string(),
@@ -68,7 +74,7 @@ export class ToolRouter {
     this.context = context;
     this.allowedTools = toolDefinitions
       ? new Set(toolDefinitions.map((t) => t.name))
-      : new Set(['get_schema', 'run_sql', 'describe_table', 'create_view', 'modify_view']);
+      : new Set(['get_schema', 'run_sql', 'describe_table', 'update_schema_notes', 'create_view', 'modify_view']);
   }
 
   /** Execute a tool call and return the result. Errors are returned, not thrown. */
@@ -107,6 +113,9 @@ export class ToolRouter {
           break;
         case 'describe_table':
           result = await this.handleDescribeTable(normalizedInput);
+          break;
+        case 'update_schema_notes':
+          result = await this.handleUpdateSchemaNotes(normalizedInput);
           break;
         case 'run_sql':
           result = await this.handleRunSQL(normalizedInput);
@@ -171,6 +180,21 @@ export class ToolRouter {
 
     const result = await this.context.describeTable(parsed.data.source_id, parsed.data.table_name);
     return { content: JSON.stringify(result, null, 2), isError: false };
+  }
+
+  /** Handle update_schema_notes — appends a note to the schema documentation. */
+  private async handleUpdateSchemaNotes(input: Record<string, unknown>): Promise<ToolExecutionResult> {
+    const parsed = toolInputSchemas.update_schema_notes.safeParse(input);
+    if (!parsed.success) {
+      return { content: `Invalid input: ${parsed.error.message}`, isError: true };
+    }
+
+    if (!this.context.updateSchemaNotes) {
+      return { content: 'update_schema_notes is not available', isError: true };
+    }
+
+    await this.context.updateSchemaNotes(parsed.data.source_id, parsed.data.note);
+    return { content: 'Schema note saved successfully.', isError: false };
   }
 
   /** Handle create_view tool call — stores an HTML view. */

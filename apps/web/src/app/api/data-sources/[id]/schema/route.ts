@@ -5,12 +5,19 @@ import {
   introspectSchema,
   DataSourceError,
 } from '@/lib/data-source-service';
+import { dataSources } from '@lightboard/db/schema';
+import { eq, and } from 'drizzle-orm';
+
+/** Extracts the data source ID from the URL path. */
+function extractId(req: Request): string | null {
+  const segments = new URL(req.url).pathname.split('/');
+  const schemaIdx = segments.indexOf('schema');
+  return segments[schemaIdx - 1] ?? null;
+}
 
 /** GET /api/data-sources/[id]/schema — Introspect the data source schema. */
 export const GET = withAuth(async (req, { db, orgId }) => {
-  const segments = req.nextUrl.pathname.split('/');
-  const schemaIdx = segments.indexOf('schema');
-  const id = segments[schemaIdx - 1];
+  const id = extractId(req);
   if (!id) {
     return NextResponse.json({ error: 'ID is required' }, { status: 400 });
   }
@@ -38,4 +45,48 @@ export const GET = withAuth(async (req, { db, orgId }) => {
       { status: 500 },
     );
   }
+});
+
+/**
+ * PUT /api/data-sources/[id]/schema — Set the curated schema document.
+ * Body: { schemaDoc: string } — a markdown document describing the schema.
+ * This takes priority over auto-generated schema context in agent prompts.
+ */
+export const PUT = withAuth(async (req, { db, orgId }) => {
+  const id = extractId(req);
+  if (!id) {
+    return NextResponse.json({ error: 'ID is required' }, { status: 400 });
+  }
+
+  let body: Record<string, unknown>;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
+
+  const schemaDoc = body.schemaDoc;
+  if (typeof schemaDoc !== 'string') {
+    return NextResponse.json({ error: 'schemaDoc (string) is required' }, { status: 400 });
+  }
+
+  // Load existing config and merge
+  const [source] = await db
+    .select({ config: dataSources.config })
+    .from(dataSources)
+    .where(and(eq(dataSources.id, id), eq(dataSources.orgId, orgId)));
+
+  if (!source) {
+    return NextResponse.json({ error: 'Data source not found' }, { status: 404 });
+  }
+
+  const existingConfig = (source.config as Record<string, unknown>) ?? {};
+  const updatedConfig = { ...existingConfig, schemaDoc };
+
+  await db
+    .update(dataSources)
+    .set({ config: updatedConfig, updatedAt: new Date() })
+    .where(eq(dataSources.id, id));
+
+  return NextResponse.json({ ok: true, schemaDocLength: schemaDoc.length });
 });

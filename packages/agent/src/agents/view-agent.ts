@@ -32,6 +32,7 @@ export class ViewAgent implements SubAgent {
     ];
 
     const maxRounds = this.config.maxToolRounds ?? 3;
+    let viewResult: Record<string, unknown> | undefined;
 
     for (let round = 0; round < maxRounds; round++) {
       const toolCalls: ToolCallResult[] = [];
@@ -88,14 +89,13 @@ export class ViewAgent implements SubAgent {
         return {
           role: 'view',
           success: true,
-          data: this.extractViewData(textContent),
+          data: viewResult ?? this.extractViewData(textContent),
           explanation: textContent,
         };
       }
 
       // Execute tool calls and collect results
       const toolResults = [];
-      let lastViewResult: Record<string, unknown> | undefined;
 
       for (const tc of toolCalls) {
         const result = await this.config.toolRouter.execute(tc.name, tc.input);
@@ -108,7 +108,7 @@ export class ViewAgent implements SubAgent {
         // Capture the view data from create_view or modify_view results
         if (!result.isError && (tc.name === 'create_view' || tc.name === 'modify_view')) {
           try {
-            lastViewResult = JSON.parse(result.content) as Record<string, unknown>;
+            viewResult = JSON.parse(result.content) as Record<string, unknown>;
           } catch {
             // ignore parse failures
           }
@@ -122,11 +122,11 @@ export class ViewAgent implements SubAgent {
       });
 
       // If this is the last round and we have a view result, return it
-      if (round === maxRounds - 1 && lastViewResult) {
+      if (round === maxRounds - 1 && viewResult) {
         return {
           role: 'view',
           success: true,
-          data: lastViewResult,
+          data: viewResult,
           explanation: textContent || 'View created successfully',
         };
       }

@@ -240,17 +240,22 @@ export async function executeRawSQL(
   sql: string,
 ): Promise<QueryResult> {
   const trimmed = sql.trim();
-  if (!trimmed.toUpperCase().startsWith('SELECT')) {
+  // Strip leading SQL comments before checking the statement type
+  const stripped = trimmed.replace(/^(--[^\n]*\n\s*|\/\*[\s\S]*?\*\/\s*)*/g, '');
+  const upper = stripped.toUpperCase();
+  if (!upper.startsWith('SELECT') && !upper.startsWith('WITH')) {
     throw new DataSourceError('Only SELECT queries are allowed', 'validation');
   }
   checkForDDL(trimmed);
 
-  // Inject LIMIT if not present
-  if (!trimmed.toUpperCase().includes('LIMIT')) {
-    const limited = `${trimmed} LIMIT ${DEFAULT_LIMIT}`;
-    return executeRawSQLInternal(connection, limited);
+  // Strip trailing semicolons (agents often include them, but they break LIMIT injection)
+  const cleaned = trimmed.replace(/;\s*$/, '');
+
+  // Inject LIMIT if not present in the outermost query
+  if (!cleaned.toUpperCase().includes('LIMIT')) {
+    return executeRawSQLInternal(connection, `${cleaned} LIMIT ${DEFAULT_LIMIT}`);
   }
-  return executeRawSQLInternal(connection, trimmed);
+  return executeRawSQLInternal(connection, cleaned);
 }
 
 async function executeRawSQLInternal(

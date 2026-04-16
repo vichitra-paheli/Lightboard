@@ -25,6 +25,7 @@ export {
 } from './provider';
 export { SessionScratchpad, ScratchpadManager, type ScratchpadTable, type ScratchpadLimits, type ScratchpadManagerOptions } from './scratchpad';
 export { buildSystemPrompt, buildQueryPrompt, buildViewPrompt, buildInsightsPrompt, buildLeaderPrompt } from './prompt';
+export { generateSchemaContext, renderSchemaContext, type SchemaContext, type EnrichedTable } from './bootstrap';
 export {
   agentTools,
   queryTools,

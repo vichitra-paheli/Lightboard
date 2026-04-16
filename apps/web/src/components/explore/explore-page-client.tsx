@@ -23,6 +23,7 @@ import { ViewRenderer, HtmlViewRenderer, type HtmlView } from '@/components/view
 import { ChatPanel } from './chat-panel';
 import type { ChatMessageData, ToolCallData, AgentIndicatorData } from './chat-message';
 import { DataSourceSelector, type DataSourceOption } from './data-source-selector';
+import { SchemaCurationPanel } from './schema-curation-panel';
 import { parseSSE } from '@/lib/sse-parser';
 
 /**
@@ -42,6 +43,10 @@ export function ExplorePageClient() {
   const isHtmlView = (view: ViewSpec | HtmlView): view is HtmlView => 'html' in view;
   const [dataSources, setDataSources] = useState<DataSourceOption[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const [schemaCuration, setSchemaCuration] = useState<{
+    phase: 'callout' | 'generating' | 'editing' | 'saving';
+    markdown: string;
+  } | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   // Fetch data sources from API on mount
@@ -52,10 +57,11 @@ export function ExplorePageClient() {
         if (res.ok) {
           const data = await res.json();
           setDataSources(
-            data.dataSources.map((ds: { id: string; name: string; type: string }) => ({
+            data.dataSources.map((ds: { id: string; name: string; type: string; config?: Record<string, unknown> }) => ({
               id: ds.id,
               name: ds.name,
               type: ds.type,
+              hasSchemaDoc: !!ds.config?.schemaDoc,
             })),
           );
         }
@@ -79,6 +85,63 @@ export function ExplorePageClient() {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, []);
+
+  // Show schema curation callout when a source without schemaDoc is selected
+  useEffect(() => {
+    if (!selectedSource) {
+      setSchemaCuration(null);
+      return;
+    }
+    const source = dataSources.find((s) => s.id === selectedSource);
+    if (source && !source.hasSchemaDoc && !currentView) {
+      setSchemaCuration({ phase: 'callout', markdown: '' });
+    } else {
+      setSchemaCuration(null);
+    }
+  }, [selectedSource, dataSources, currentView]);
+
+  /** Generate schema documentation for the selected data source. */
+  const handleGenerateSchema = useCallback(async () => {
+    if (!selectedSource) return;
+    setSchemaCuration({ phase: 'generating', markdown: '' });
+    try {
+      const res = await fetch(`/api/data-sources/${selectedSource}/schema/generate`, {
+        method: 'POST',
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error ?? `Generation failed: ${res.status}`);
+      }
+      const { annotatedMarkdown } = await res.json();
+      setSchemaCuration({ phase: 'editing', markdown: annotatedMarkdown });
+    } catch {
+      // Fall back to callout on error
+      setSchemaCuration({ phase: 'callout', markdown: '' });
+    }
+  }, [selectedSource]);
+
+  /** Save the curated schema document. */
+  const handleSaveSchema = useCallback(async (markdown: string) => {
+    if (!selectedSource) return;
+    setSchemaCuration((prev) => prev ? { ...prev, phase: 'saving' } : null);
+    try {
+      const res = await fetch(`/api/data-sources/${selectedSource}/schema`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ schemaDoc: markdown }),
+      });
+      if (!res.ok) throw new Error('Save failed');
+      // Update local state so callout doesn't reappear
+      setDataSources((prev) =>
+        prev.map((ds) =>
+          ds.id === selectedSource ? { ...ds, hasSchemaDoc: true } : ds,
+        ),
+      );
+      setSchemaCuration(null);
+    } catch {
+      setSchemaCuration((prev) => prev ? { ...prev, phase: 'editing' } : null);
+    }
+  }, [selectedSource]);
 
   /** Consumes an SSE stream and updates messages progressively. */
   const consumeSSEStream = useCallback(
@@ -464,7 +527,7 @@ export function ExplorePageClient() {
             />
           </div>
 
-          {/* Right: View */}
+          {/* Right: View or Schema Curation */}
           <div className="flex-1 overflow-auto">
             {currentView && isHtmlView(currentView) ? (
               <HtmlViewRenderer
@@ -479,6 +542,17 @@ export function ExplorePageClient() {
                 error={null}
                 width={800}
                 height={600}
+              />
+            ) : schemaCuration ? (
+              <SchemaCurationPanel
+                sourceId={selectedSource ?? ''}
+                sourceName={dataSources.find((s) => s.id === selectedSource)?.name ?? ''}
+                phase={schemaCuration.phase}
+                markdown={schemaCuration.markdown}
+                onGenerate={handleGenerateSchema}
+                onSave={handleSaveSchema}
+                onCancel={() => setSchemaCuration({ phase: 'callout', markdown: '' })}
+                onMarkdownChange={(md) => setSchemaCuration((prev) => prev ? { ...prev, markdown: md } : null)}
               />
             ) : (
               <div className="flex h-full items-center justify-center">
