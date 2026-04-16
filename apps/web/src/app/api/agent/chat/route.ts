@@ -9,7 +9,7 @@ import {
 import { checkRateLimit, addRateLimitHeaders } from '@/lib/rate-limit';
 import { redis } from '@/lib/redis';
 import { dataSources } from '@lightboard/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import {
   LeaderAgent,
   ScratchpadManager,
@@ -188,23 +188,10 @@ export const POST = withAuth(async (req, { db, orgId }) => {
         sampleRows: (sampleResult as { rows?: unknown[] }).rows ?? [],
       } as unknown as Record<string, unknown>;
     },
-    updateSchemaNotes: async (srcId: string, note: string) => {
-      const [source] = await db
-        .select({ config: dataSources.config })
-        .from(dataSources)
-        .where(and(eq(dataSources.id, srcId), eq(dataSources.orgId, orgId)));
-      if (!source) throw new DataSourceError('Data source not found', 'not_found');
-
-      const config = (source.config as Record<string, unknown>) ?? {};
-      const existingDoc = (config.schemaDoc as string) ?? '';
-      const updatedDoc = existingDoc
-        ? `${existingDoc}\n\n### Agent Notes\n\n${note}`
-        : `### Agent Notes\n\n${note}`;
-      await db
-        .update(dataSources)
-        .set({ config: { ...config, schemaDoc: updatedDoc }, updatedAt: new Date() })
-        .where(eq(dataSources.id, srcId));
-      console.log(`[Chat] Schema note saved for source ${srcId}: ${note.slice(0, 100)}`);
+    saveSchemaDoc: async (_srcId: string, document: string) => {
+      // propose_schema_doc does NOT save — it returns the doc for human review.
+      // The frontend will show it in the editor; the user saves via PUT /api/data-sources/[id]/schema.
+      console.log(`[Chat] Schema doc proposed: ${document.length} chars (awaiting user review)`);
     },
   };
 
@@ -438,6 +425,10 @@ function handleStreaming(
                     if ((event.name === 'create_view' || event.name === 'modify_view') && parsed.viewSpec) {
                       console.log(`[Chat] Emitting view_created (direct), html=${parsed.viewSpec.html?.length ?? 0} chars`);
                       enqueue('view_created', { viewSpec: parsed.viewSpec });
+                    }
+                    // Emit schema_proposed when propose_schema_doc succeeds — sends doc to editor
+                    if (event.name === 'propose_schema_doc' && parsed.proposed) {
+                      enqueue('schema_proposed', { document: parsed.document });
                     }
                     if (event.name === 'delegate_view') {
                       const viewSpec = parsed.viewSpec ?? parsed;

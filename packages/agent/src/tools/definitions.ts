@@ -60,24 +60,27 @@ export const agentTools: ToolDefinition[] = [
     },
   },
   {
-    name: 'update_schema_notes',
+    name: 'propose_schema_doc',
     description:
-      'Append a note to the schema documentation for this data source. ' +
-      'Use this when you discover something useful about the schema: a join pattern, a gotcha, ' +
-      'a column meaning, or a query pattern that works well. These notes persist across conversations.',
+      'Propose schema documentation for the user to review and edit. ' +
+      'The document will be shown in an editor for the user to curate before saving. ' +
+      'The document should be a concise, LLM-optimized markdown reference covering: ' +
+      'table descriptions, key columns, join patterns, filtering gotchas, enum values, and example queries. ' +
+      'Keep it under 6000 characters. ' +
+      'IMPORTANT: Before calling this, you MUST ask the user questions about the domain to fill gaps in your understanding.',
     inputSchema: {
       type: 'object',
       properties: {
         source_id: {
           type: 'string',
-          description: 'The data source to annotate',
+          description: 'The data source to save documentation for',
         },
-        note: {
+        document: {
           type: 'string',
-          description: 'The note to append (markdown). E.g. "### Gotcha\\nmatches.series is often NULL for IPL — use training_data.match_format instead."',
+          description: 'The complete schema documentation as markdown',
         },
       },
-      required: ['source_id', 'note'],
+      required: ['source_id', 'document'],
     },
   },
   {

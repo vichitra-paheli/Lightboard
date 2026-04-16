@@ -10,8 +10,8 @@ export interface ToolContext {
   runSQL?: (sourceId: string, sql: string) => Promise<Record<string, unknown>>;
   /** Describe a single table: columns, types, and sample rows. */
   describeTable?: (sourceId: string, tableName: string) => Promise<Record<string, unknown>>;
-  /** Append a note to the schema documentation for a data source. */
-  updateSchemaNotes?: (sourceId: string, note: string) => Promise<void>;
+  /** Save the complete schema documentation for a data source. */
+  saveSchemaDoc?: (sourceId: string, document: string) => Promise<void>;
   /** Get the current view state. */
   getCurrentView?: () => Record<string, unknown> | null;
   /** Execute DuckDB SQL on the session scratchpad for statistical analysis. */
@@ -33,9 +33,9 @@ const toolInputSchemas = {
     source_id: z.string().min(1),
     table_name: z.string().min(1),
   }),
-  update_schema_notes: z.object({
+  propose_schema_doc: z.object({
     source_id: z.string().min(1),
-    note: z.string().min(1),
+    document: z.string().min(1),
   }),
   create_view: z.object({
     title: z.string(),
@@ -74,7 +74,7 @@ export class ToolRouter {
     this.context = context;
     this.allowedTools = toolDefinitions
       ? new Set(toolDefinitions.map((t) => t.name))
-      : new Set(['get_schema', 'run_sql', 'describe_table', 'update_schema_notes', 'create_view', 'modify_view']);
+      : new Set(['get_schema', 'run_sql', 'describe_table', 'propose_schema_doc', 'create_view', 'modify_view']);
   }
 
   /** Execute a tool call and return the result. Errors are returned, not thrown. */
@@ -114,8 +114,8 @@ export class ToolRouter {
         case 'describe_table':
           result = await this.handleDescribeTable(normalizedInput);
           break;
-        case 'update_schema_notes':
-          result = await this.handleUpdateSchemaNotes(normalizedInput);
+        case 'propose_schema_doc':
+          result = await this.handleSaveSchemaDoc(normalizedInput);
           break;
         case 'run_sql':
           result = await this.handleRunSQL(normalizedInput);
@@ -182,19 +182,19 @@ export class ToolRouter {
     return { content: JSON.stringify(result, null, 2), isError: false };
   }
 
-  /** Handle update_schema_notes — appends a note to the schema documentation. */
-  private async handleUpdateSchemaNotes(input: Record<string, unknown>): Promise<ToolExecutionResult> {
-    const parsed = toolInputSchemas.update_schema_notes.safeParse(input);
+  /** Handle propose_schema_doc — saves the complete schema documentation. */
+  private async handleSaveSchemaDoc(input: Record<string, unknown>): Promise<ToolExecutionResult> {
+    const parsed = toolInputSchemas.propose_schema_doc.safeParse(input);
     if (!parsed.success) {
       return { content: `Invalid input: ${parsed.error.message}`, isError: true };
     }
 
-    if (!this.context.updateSchemaNotes) {
-      return { content: 'update_schema_notes is not available', isError: true };
+    if (!this.context.saveSchemaDoc) {
+      return { content: 'propose_schema_doc is not available', isError: true };
     }
 
-    await this.context.updateSchemaNotes(parsed.data.source_id, parsed.data.note);
-    return { content: 'Schema note saved successfully.', isError: false };
+    await this.context.saveSchemaDoc(parsed.data.source_id, parsed.data.document);
+    return { content: JSON.stringify({ proposed: true, document: parsed.data.document }), isError: false };
   }
 
   /** Handle create_view tool call — stores an HTML view. */
