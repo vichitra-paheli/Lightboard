@@ -33,7 +33,17 @@
     "stop": "Stop",
     "dataSource": "Data source",
     "selectDataSource": "Select a data source...",
-    "noResponse": "No response from agent."
+    "noResponse": "No response from agent.",
+    "schemaSetupTitle": "Set up schema documentation",
+    "schemaSetupDescription": "Generate AI-annotated schema documentation for \"{sourceName}\" to help the agent write better queries. This takes about 15 seconds.",
+    "schemaGenerate": "Generate Schema Documentation",
+    "schemaGenerating": "Generating schema documentation...",
+    "schemaGeneratingHint": "Introspecting database and annotating with AI",
+    "schemaEditorTitle": "Schema Documentation — {sourceName}",
+    "schemaEditorHint": "Edit the schema context that the AI agent uses for queries",
+    "schemaSave": "Save",
+    "schemaSaving": "Saving...",
+    "cancel": "Cancel"
   },
   "dataSources": {
     "title": "Data Sources",

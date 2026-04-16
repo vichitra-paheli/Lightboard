@@ -372,18 +372,31 @@ function handleStreaming(
   sessionId: string,
 ): Response {
   const encoder = new TextEncoder();
+  const abort = new AbortController();
 
   const stream = new ReadableStream({
     async start(controller) {
       const enqueue = (event: string, data: Record<string, unknown>) => {
-        controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+        if (abort.signal.aborted) return;
+        try {
+          controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+        } catch {
+          // Client disconnected — trigger abort
+          abort.abort();
+        }
       };
 
-      // Heartbeat interval
+      // Heartbeat interval — also detects dead connections
       const heartbeat = setInterval(() => {
+        if (abort.signal.aborted) {
+          clearInterval(heartbeat);
+          return;
+        }
         try {
           controller.enqueue(encoder.encode(': heartbeat\n\n'));
         } catch {
+          console.log('[Chat] Client disconnected (heartbeat failed), aborting agent');
+          abort.abort();
           clearInterval(heartbeat);
         }
       }, 15_000);
@@ -393,8 +406,16 @@ function handleStreaming(
           setTimeout(() => reject(new Error('Agent processing timed out')), AGENT_TIMEOUT_MS);
         });
 
+        const abortPromise = new Promise<never>((_, reject) => {
+          abort.signal.addEventListener('abort', () => reject(new Error('Client disconnected')));
+        });
+
         const processStream = async () => {
           for await (const event of leader.chat(message, sessionId)) {
+            if (abort.signal.aborted) {
+              console.log('[Chat] Agent processing aborted — client disconnected');
+              return;
+            }
             switch (event.type) {
               case 'text':
                 enqueue('text', { text: event.text });
@@ -414,12 +435,10 @@ function handleStreaming(
                   try {
                     const parsed = JSON.parse(event.result);
                     console.log(`[Chat] Tool result for ${event.name}: keys=${Object.keys(parsed).join(',')}`);
-                    // Direct create_view/modify_view (single-agent path)
                     if ((event.name === 'create_view' || event.name === 'modify_view') && parsed.viewSpec) {
                       console.log(`[Chat] Emitting view_created (direct), html=${parsed.viewSpec.html?.length ?? 0} chars`);
                       enqueue('view_created', { viewSpec: parsed.viewSpec });
                     }
-                    // delegate_view (multi-agent path) — ViewSpec is in the sub-agent result
                     if (event.name === 'delegate_view') {
                       const viewSpec = parsed.viewSpec ?? parsed;
                       if (viewSpec.html || viewSpec.viewId) {
@@ -441,10 +460,8 @@ function handleStreaming(
                 enqueue('thinking', { text: event.text });
                 break;
               case 'done': {
-                // Save conversation before closing
                 const history = leader.getHistory();
                 await saveConversation(orgId, sessionId, history);
-
                 enqueue('done', { stopReason: event.stopReason, conversationId: sessionId });
                 break;
               }
@@ -452,17 +469,25 @@ function handleStreaming(
           }
         };
 
-        await Promise.race([processStream(), timeoutPromise]);
+        await Promise.race([processStream(), timeoutPromise, abortPromise]);
       } catch (err) {
-        const errorMessage = err instanceof LLMError
-          ? (err.statusCode === 429 ? 'AI service is busy, please retry.' : 'AI service error.')
-          : (err instanceof Error ? err.message : String(err));
-
-        enqueue('error', { error: errorMessage });
+        if (!abort.signal.aborted) {
+          const errorMessage = err instanceof LLMError
+            ? (err.statusCode === 429 ? 'AI service is busy, please retry.' : 'AI service error.')
+            : (err instanceof Error ? err.message : String(err));
+          enqueue('error', { error: errorMessage });
+        } else {
+          console.log(`[Chat] Stream ended — client disconnected (session=${sessionId})`);
+        }
       } finally {
         clearInterval(heartbeat);
-        controller.close();
+        try { controller.close(); } catch { /* already closed */ }
       }
+    },
+    cancel() {
+      // Called when the client closes the connection (navigates away, screen sleep, etc.)
+      console.log(`[Chat] Client cancelled SSE stream (session=${sessionId})`);
+      abort.abort();
     },
   });
 

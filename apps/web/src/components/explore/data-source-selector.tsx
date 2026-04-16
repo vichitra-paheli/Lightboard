@@ -7,6 +7,7 @@ export interface DataSourceOption {
   id: string;
   name: string;
   type: string;
+  hasSchemaDoc?: boolean;
 }
 
 /** Props for DataSourceSelector. */

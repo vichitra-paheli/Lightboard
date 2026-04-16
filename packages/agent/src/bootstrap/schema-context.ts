@@ -31,18 +31,20 @@ export interface SchemaContext {
   generatedAt: string;
 }
 
-/** SQL: tables with row counts from pg_stat. */
+/** SQL: tables with row counts from pg_class (more reliable than pg_stat which requires ANALYZE). */
 const TABLES_WITH_COUNTS = `
   SELECT
     t.table_schema,
     t.table_name,
-    COALESCE(s.n_live_tup, 0) AS row_count
+    COALESCE(c.reltuples, 0)::bigint AS row_count
   FROM information_schema.tables t
-  LEFT JOIN pg_stat_user_tables s
-    ON t.table_name = s.relname AND t.table_schema = s.schemaname
+  LEFT JOIN pg_class c
+    ON c.relname = t.table_name
+  LEFT JOIN pg_namespace n
+    ON n.oid = c.relnamespace AND n.nspname = t.table_schema
   WHERE t.table_schema NOT IN ('pg_catalog', 'information_schema')
     AND t.table_type = 'BASE TABLE'
-  ORDER BY s.n_live_tup DESC NULLS LAST
+  ORDER BY c.reltuples DESC NULLS LAST
 `;
 
 /** SQL: columns with PKs. */
