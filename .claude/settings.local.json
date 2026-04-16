@@ -18,7 +18,6 @@
       "Bash(pnpm:*)",
       "Bash(ls:*)",
       "Bash(corepack enable:*)",
-      "Bash(/c/Users/anura/AppData/Roaming/npm/pnpm --version)",
       "Bash(export:*)",
       "Bash(git commit:*)",
       "Bash(curl:*)",
@@ -48,7 +47,8 @@
       "mcp__kapture__select",
       "Bash(awk '{print $5}')",
       "Bash(xargs -I{} taskkill //F //PID {})",
-      "Bash(git fetch:*)"
+      "Bash(git fetch:*)",
+      "mcp__Claude_Preview__preview_start"
     ]
   }
 }
