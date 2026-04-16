@@ -47,6 +47,7 @@ export function ExplorePageClient() {
     phase: 'callout' | 'generating' | 'editing' | 'saving';
     markdown: string;
   } | null>(null);
+  const schemaGenerationTriggered = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   // Fetch data sources from API on mount
@@ -90,8 +91,11 @@ export function ExplorePageClient() {
   useEffect(() => {
     if (!selectedSource) {
       setSchemaCuration(null);
+      schemaGenerationTriggered.current = false;
       return;
     }
+    // Don't re-show callout if generation was already triggered in this session
+    if (schemaGenerationTriggered.current) return;
     const source = dataSources.find((s) => s.id === selectedSource);
     if (source && !source.hasSchemaDoc && !currentView) {
       setSchemaCuration({ phase: 'callout', markdown: '' });
@@ -99,26 +103,6 @@ export function ExplorePageClient() {
       setSchemaCuration(null);
     }
   }, [selectedSource, dataSources, currentView]);
-
-  /** Generate schema documentation for the selected data source. */
-  const handleGenerateSchema = useCallback(async () => {
-    if (!selectedSource) return;
-    setSchemaCuration({ phase: 'generating', markdown: '' });
-    try {
-      const res = await fetch(`/api/data-sources/${selectedSource}/schema/generate`, {
-        method: 'POST',
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error ?? `Generation failed: ${res.status}`);
-      }
-      const { annotatedMarkdown } = await res.json();
-      setSchemaCuration({ phase: 'editing', markdown: annotatedMarkdown });
-    } catch {
-      // Fall back to callout on error
-      setSchemaCuration({ phase: 'callout', markdown: '' });
-    }
-  }, [selectedSource]);
 
   /** Save the curated schema document. */
   const handleSaveSchema = useCallback(async (markdown: string) => {
@@ -298,6 +282,13 @@ export function ExplorePageClient() {
                       });
                   }
                 }
+              }
+              break;
+
+            case 'schema_proposed':
+              // Agent proposed a schema doc — open it in the editor for user review
+              if (data.document) {
+                setSchemaCuration({ phase: 'editing', markdown: data.document });
               }
               break;
 
@@ -492,6 +483,30 @@ export function ExplorePageClient() {
       prev.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m)),
     );
   }, []);
+
+  /** Generate schema documentation by sending a chat message that triggers exploration. */
+  const handleGenerateSchema = useCallback(() => {
+    if (!selectedSource) return;
+    schemaGenerationTriggered.current = true;
+    setSchemaCuration(null); // Hide callout while chat runs
+    const source = dataSources.find((s) => s.id === selectedSource);
+    const sourceName = source?.name ?? 'this database';
+    handleSend(
+      `I need you to explore the "${sourceName}" database (source_id: ${selectedSource}) and create schema documentation.\n\n` +
+      `Follow these steps IN ORDER:\n\n` +
+      `**Phase 1 — Explore:** Use get_schema, describe_table, and run_sql to understand the tables, columns, relationships, and data patterns. ` +
+      `Pay special attention to: foreign key columns (which ID columns link to which tables), ` +
+      `enum/categorical values, date ranges, and row counts.\n\n` +
+      `**Phase 2 — Ask Questions:** Before writing any documentation, you MUST ask me at least 3 questions about:\n` +
+      `- Which tables are most important for the use cases I care about\n` +
+      `- Any domain-specific terminology or gotchas I should know about\n` +
+      `- How specific filtering should work (e.g. how to identify certain subsets of data)\n` +
+      `Wait for my answers before proceeding.\n\n` +
+      `**Phase 3 — Propose:** After I answer your questions, call propose_schema_doc with source_id="${selectedSource}" ` +
+      `and the complete documentation as markdown. I will review and edit it before saving.\n\n` +
+      `The documentation should cover: table descriptions, key columns, join patterns, data gotchas, and example queries. Keep it under 6000 characters.`,
+    );
+  }, [selectedSource, dataSources, handleSend]);
 
   const handleNewConversation = useCallback(() => {
     handleStop();

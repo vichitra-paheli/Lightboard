@@ -167,6 +167,10 @@ export class LeaderAgent {
 
         if (tc.name.startsWith('delegate_')) {
           result = yield* this.handleDelegation(tc, conversationId);
+        } else if (tc.name === 'propose_schema_doc') {
+          // Route propose_schema_doc through the ToolRouter for DB persistence
+          const router = new ToolRouter(this.toolContext);
+          result = await router.execute(tc.name, tc.input);
         } else if (tc.name === 'list_scratchpads') {
           const tables = scratchpad.listTables();
           result = { content: JSON.stringify(tables), isError: false };

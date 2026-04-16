@@ -81,6 +81,30 @@ export const leaderTools: ToolDefinition[] = [
     },
   },
   {
+    name: 'propose_schema_doc',
+    description:
+      'Propose schema documentation for the user to review and edit before saving. ' +
+      'The document will be shown in an editor — it is NOT saved automatically. ' +
+      'IMPORTANT: Before calling this, you MUST ask the user questions about the domain. ' +
+      'The document should be a concise, LLM-optimized markdown reference covering: ' +
+      'table descriptions, key columns, join patterns, filtering gotchas, enum values, and example queries. ' +
+      'Keep it under 6000 characters.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        source_id: {
+          type: 'string',
+          description: 'The data source to save documentation for',
+        },
+        document: {
+          type: 'string',
+          description: 'The complete schema documentation as markdown',
+        },
+      },
+      required: ['source_id', 'document'],
+    },
+  },
+  {
     name: 'load_scratchpad',
     description:
       'Load a summary of a scratchpad table (columns, row count, sample rows). ' +
