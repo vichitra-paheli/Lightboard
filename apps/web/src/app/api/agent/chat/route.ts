@@ -263,6 +263,20 @@ async function handleNonStreaming(
             } catch { /* ignore parse errors */ }
           }
 
+          // Extract ViewSpec from await_tasks results (dispatched view agents)
+          if (event.name === 'await_tasks' && !event.isError) {
+            try {
+              const parsed = JSON.parse(event.result);
+              for (const taskResult of Object.values(parsed) as Array<Record<string, unknown>>) {
+                if (taskResult && taskResult.role === 'view' && taskResult.success && taskResult.data) {
+                  const viewData = taskResult.data as Record<string, unknown>;
+                  const candidate = (viewData.viewSpec as Record<string, unknown>) ?? viewData;
+                  if (candidate && (candidate.html || candidate.viewId)) viewSpec = candidate;
+                }
+              }
+            } catch { /* ignore parse errors */ }
+          }
+
           // Extract query results from run_sql
           if (event.name === 'run_sql' && !event.isError) {
             try {
@@ -456,6 +470,19 @@ function handleStreaming(
                         enqueue('view_created', { viewSpec });
                       }
                     }
+                    // Emit view_created for view tasks surfaced via await_tasks.
+                    if (event.name === 'await_tasks') {
+                      for (const taskResult of Object.values(parsed) as Array<Record<string, unknown>>) {
+                        if (taskResult && taskResult.role === 'view' && taskResult.success && taskResult.data) {
+                          const viewData = taskResult.data as Record<string, unknown>;
+                          const viewSpec = (viewData.viewSpec as Record<string, unknown>) ?? viewData;
+                          if (viewSpec && (viewSpec.html || viewSpec.viewId)) {
+                            console.log(`[Chat] Emitting view_created (dispatch), html=${(viewSpec.html as string | undefined)?.length ?? 0} chars`);
+                            enqueue('view_created', { viewSpec });
+                          }
+                        }
+                      }
+                    }
                   } catch { /* ignore parse errors */ }
                 }
                 break;
@@ -468,6 +495,32 @@ function handleStreaming(
                 break;
               case 'thinking':
                 enqueue('thinking', { text: event.text });
+                break;
+              case 'task_dispatched':
+                enqueue('task_dispatched', {
+                  taskId: event.taskId,
+                  agent: event.agent,
+                  instruction: event.instruction,
+                });
+                break;
+              case 'task_complete':
+                enqueue('task_complete', {
+                  taskId: event.taskId,
+                  agent: event.agent,
+                  summary: event.summary,
+                  isError: event.isError,
+                });
+                break;
+              case 'task_cancelled':
+                enqueue('task_cancelled', { taskId: event.taskId });
+                break;
+              case 'task_progress':
+                enqueue('task_progress', { taskId: event.taskId, message: event.message });
+                break;
+              case 'status':
+                // Leader/sub-agent free-form status — distinct from the schema
+                // bootstrap `status` wire event (which uses { text } payload).
+                enqueue('agent_status', { scope: event.scope, message: event.message });
                 break;
               case 'done': {
                 const history = leader.getHistory();

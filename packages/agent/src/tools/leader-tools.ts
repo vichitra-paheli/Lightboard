@@ -4,14 +4,122 @@ import type { ToolDefinition } from '../provider/types';
  * Tool definitions available to the Leader Agent.
  * Delegation tools for sub-agents + lightweight scratchpad inspection.
  *
- * Data stays server-side: delegate_query auto-saves results to the scratchpad.
+ * Two dispatch modes are available:
+ *   - `dispatch_*`: asynchronous. Returns a task_id immediately so multiple
+ *     sub-agents can run in parallel. Collect results with `await_tasks`.
+ *   - `delegate_*`: synchronous (legacy). Blocks until the sub-agent finishes.
+ *
+ * Data stays server-side: query tasks auto-save results to the scratchpad.
  * The LLM only sees compact summaries (columns, row count, sample rows).
  */
 export const leaderTools: ToolDefinition[] = [
   {
+    name: 'dispatch_query',
+    description:
+      'Dispatch a query task to the Query specialist and return immediately with a task_id. ' +
+      'The task runs in the background — use `await_tasks` to collect the result. ' +
+      'Call this multiple times in a single turn to run queries in parallel. ' +
+      'Results are auto-saved to the scratchpad once the task completes.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        instruction: {
+          type: 'string',
+          description: 'Clear instruction for the query agent (e.g., "Get total sales by region from the orders table")',
+        },
+        source_id: {
+          type: 'string',
+          description: 'The data source ID to query against',
+        },
+      },
+      required: ['instruction', 'source_id'],
+    },
+  },
+  {
+    name: 'dispatch_view',
+    description:
+      'Dispatch a visualization task to the View specialist and return immediately with a task_id. ' +
+      'Use `await_tasks` to collect the result. ' +
+      'You may dispatch this before a `dispatch_query` result is available by referencing a scratchpad table — ' +
+      'just wait on the query task first with `await_tasks`.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        instruction: {
+          type: 'string',
+          description: 'What visualization to create (e.g., "Create a bar chart of sales by region")',
+        },
+        scratchpad_table: {
+          type: 'string',
+          description: 'Name of the scratchpad table containing the data',
+        },
+      },
+      required: ['instruction'],
+    },
+  },
+  {
+    name: 'dispatch_insights',
+    description:
+      'Dispatch a statistical analysis task to the Insights specialist and return immediately with a task_id. ' +
+      'Use `await_tasks` to collect the result.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        instruction: {
+          type: 'string',
+          description: 'What analysis to perform (e.g., "Find outliers in the sales data")',
+        },
+        table_name: {
+          type: 'string',
+          description: 'Optional scratchpad table name to analyze',
+        },
+      },
+      required: ['instruction'],
+    },
+  },
+  {
+    name: 'await_tasks',
+    description:
+      'Wait for one or more dispatched tasks to complete and collect their results. ' +
+      'Returns a map of task_id → { success, summary, data_summary (for queries), explanation }. ' +
+      'Unknown or timed-out task ids come back as errors — the others complete normally.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_ids: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Task ids returned from dispatch_* calls',
+        },
+        timeout_ms: {
+          type: 'number',
+          description: 'Optional timeout in milliseconds (default: wait indefinitely)',
+        },
+      },
+      required: ['task_ids'],
+    },
+  },
+  {
+    name: 'cancel_task',
+    description:
+      'Cooperatively cancel a running task. Returns { cancelled: boolean }. ' +
+      'The task\'s final state will be "cancelled" — await_tasks will still return it as an error result.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id: {
+          type: 'string',
+          description: 'Task id to cancel',
+        },
+      },
+      required: ['task_id'],
+    },
+  },
+  {
     name: 'delegate_query',
     description:
-      'Delegate a data retrieval task to the Query specialist. ' +
+      '[LEGACY — prefer dispatch_query + await_tasks for parallelism] ' +
+      'Synchronously delegate a data retrieval task to the Query specialist. ' +
       'Results are automatically saved to the scratchpad — you will receive a compact summary ' +
       '(columns, row count, sample rows) and the scratchpad table name for reference.',
     inputSchema: {
@@ -32,7 +140,8 @@ export const leaderTools: ToolDefinition[] = [
   {
     name: 'delegate_view',
     description:
-      'Delegate visualization creation to the View specialist. ' +
+      '[LEGACY — prefer dispatch_view + await_tasks for parallelism] ' +
+      'Synchronously delegate visualization creation to the View specialist. ' +
       'Provide the scratchpad table name from a previous query and the desired visualization. ' +
       'The view agent receives the data summary automatically.',
     inputSchema: {
@@ -53,7 +162,8 @@ export const leaderTools: ToolDefinition[] = [
   {
     name: 'delegate_insights',
     description:
-      'Delegate statistical analysis to the Insights specialist. ' +
+      '[LEGACY — prefer dispatch_insights + await_tasks for parallelism] ' +
+      'Synchronously delegate statistical analysis to the Insights specialist. ' +
       'Provide a question and optionally the scratchpad table name to analyze.',
     inputSchema: {
       type: 'object',
