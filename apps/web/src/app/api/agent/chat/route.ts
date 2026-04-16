@@ -55,8 +55,13 @@ if (typeof leaderCleanupInterval === 'object' && 'unref' in leaderCleanupInterva
   (leaderCleanupInterval as NodeJS.Timeout).unref();
 }
 
-/** Maximum duration for agent processing in milliseconds. */
-const AGENT_TIMEOUT_MS = 600_000;
+/**
+ * Safety ceiling for the non-streaming path. The SSE path has no ceiling —
+ * it relies on the heartbeat + client disconnect to detect dead work.
+ * Introspection of large, under-documented databases can legitimately take
+ * a long time, so this number is intentionally generous.
+ */
+const AGENT_TIMEOUT_MS = 1_800_000; // 30 minutes
 
 /** Redis TTL for conversation sessions in seconds. */
 const CONVERSATION_TTL_SEC = 3600;
@@ -428,8 +433,13 @@ function handleStreaming(
           enqueue('status', { text: '' }); // Clear status
         }
 
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new Error('Agent processing timed out')), AGENT_TIMEOUT_MS);
+        // When the client disconnects, cancel every in-flight sub-agent task
+        // so we don't leak DB connections or keep hitting Claude's API.
+        abort.signal.addEventListener('abort', () => {
+          const cancelled = leader.cancelAllTasks();
+          if (cancelled > 0) {
+            console.log(`[Chat] Client disconnected — cancelled ${cancelled} in-flight task(s)`);
+          }
         });
 
         const abortPromise = new Promise<never>((_, reject) => {
@@ -538,7 +548,10 @@ function handleStreaming(
           }
         };
 
-        await Promise.race([processStream(), timeoutPromise, abortPromise]);
+        // No wall-clock timeout on the SSE path — the heartbeat + client
+        // disconnect listener are the liveness check. Introspection on a
+        // big, under-documented database can legitimately take minutes.
+        await Promise.race([processStream(), abortPromise]);
       } catch (err) {
         if (!abort.signal.aborted) {
           const errorMessage = err instanceof LLMError

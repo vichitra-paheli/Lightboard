@@ -602,4 +602,13 @@ export class LeaderAgent {
       listHandles: () => this.taskPool.listHandles(),
     };
   }
+
+  /**
+   * Cancel every running sub-agent task. Called when the SSE client
+   * disconnects so we don't leave orphan DB queries / LLM requests
+   * burning resources. Returns the number of tasks cancelled.
+   */
+  cancelAllTasks(): number {
+    return this.taskPool.cancelAll();
+  }
 }

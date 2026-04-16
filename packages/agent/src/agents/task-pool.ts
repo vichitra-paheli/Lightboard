@@ -209,6 +209,15 @@ export class TaskPool {
     return true;
   }
 
+  /** Cancel every running task. Returns the number of tasks cancelled. */
+  cancelAll(): number {
+    let count = 0;
+    for (const [id] of this.entries) {
+      if (this.cancel(id)) count++;
+    }
+    return count;
+  }
+
   /** Remove every entry. The in-flight promises keep running but are untracked. */
   clear(): void {
     this.entries.clear();

@@ -109,7 +109,11 @@ export class QueryAgent implements SubAgent {
           isError: result.isError,
         });
 
-        if (!result.isError) {
+        if (result.isError) {
+          // Surface timeout/error hints so the UI (and the model on the next
+          // turn) both see why this round failed.
+          this.emitStatus(describeQueryError(tc.name, result.content));
+        } else {
           try {
             lastQueryResult = JSON.parse(result.content) as Record<string, unknown>;
             this.emitStatus(describeQueryResult(tc.name, lastQueryResult));
@@ -157,6 +161,22 @@ function describeQueryToolCall(name: string, input: Record<string, unknown>): st
     return 'Fetching schema…';
   }
   return `Calling ${name}…`;
+}
+
+/**
+ * Produce a compact status string for a failed tool call. Tries to extract
+ * the useful piece of a long error (timeouts, parser errors, undefined cols).
+ */
+function describeQueryError(name: string, errorContent: string): string {
+  if (/timed out/i.test(errorContent)) {
+    return 'Query timed out — retrying with a sample or narrower filter';
+  }
+  if (/does not exist|undefined|unknown column/i.test(errorContent)) {
+    return `Column or table not found — will verify with describe_table`;
+  }
+  const firstLine = errorContent.split('\n')[0] ?? errorContent;
+  const compact = firstLine.replace(/\s+/g, ' ').slice(0, 90);
+  return `${name} failed: ${compact}`;
 }
 
 /** Produce a short "returned X" status string from a tool result payload. */
