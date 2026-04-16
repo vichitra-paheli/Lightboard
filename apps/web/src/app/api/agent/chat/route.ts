@@ -18,7 +18,6 @@ import {
   type AgentDataSource,
   type AgentEvent,
   type Message,
-  type SchemaContext,
   type ToolContext,
 } from '@lightboard/agent';
 import { resolveAIProvider } from '@/lib/ai-provider';
@@ -120,42 +119,25 @@ export const POST = withAuth(async (req, { db, orgId }) => {
     .from(dataSources)
     .where(eq(dataSources.orgId, orgId));
 
-  // Build agent data sources, generating enriched schema context if not cached
+  // Build agent data sources — bootstrap deferred to SSE stream to avoid timeout
   const adminDb = getAdminDb();
-  const agentDataSources: AgentDataSource[] = [];
-  for (const s of orgSources) {
+  const agentDataSources: AgentDataSource[] = orgSources.map((s) => {
     const config = s.config as Record<string, unknown> | null;
-    let schemaContext = (config?.schemaContext as SchemaContext) ?? null;
-
-    // Generate schema context on first use if missing
-    if (!schemaContext) {
-      try {
-        const connection = await getDataSourceConnection(adminDb, orgId, s.id);
-        console.log(`[Chat] Bootstrapping schema context for "${s.name}"...`);
-        const start = performance.now();
-        schemaContext = await generateSchemaContext(connection);
-        console.log(`[Chat] Schema bootstrap complete (${Math.round(performance.now() - start)}ms, ${schemaContext.tables.length} tables)`);
-
-        // Cache it back to the data source config for future requests
-        const updatedConfig = { ...(config ?? {}), schemaContext };
-        await db
-          .update(dataSources)
-          .set({ config: updatedConfig, updatedAt: new Date() })
-          .where(eq(dataSources.id, s.id));
-      } catch (err) {
-        console.error(`[Chat] Schema bootstrap failed for "${s.name}":`, err instanceof Error ? err.message : err);
-      }
-    }
-
-    agentDataSources.push({
+    return {
       id: s.id,
       name: s.name,
       type: s.type,
       schemaDoc: (config?.schemaDoc as string) ?? null,
-      schemaContext: schemaContext as unknown as Record<string, unknown> | null,
+      schemaContext: (config?.schemaContext as unknown as Record<string, unknown>) ?? null,
       cachedSchema: (config?.cachedSchema as Record<string, unknown>) ?? null,
-    });
-  }
+    };
+  });
+
+  // Identify sources that need bootstrap (no schemaDoc AND no schemaContext)
+  const sourcesNeedingBootstrap = orgSources.filter((s) => {
+    const config = s.config as Record<string, unknown> | null;
+    return !config?.schemaDoc && !config?.schemaContext;
+  });
 
   // Build ToolContext with real data source operations
   const toolContext: ToolContext = {
@@ -178,14 +160,18 @@ export const POST = withAuth(async (req, { db, orgId }) => {
         throw new DataSourceError(`Table "${tableName}" not found`, 'not_found');
       }
       // Get sample rows
+      // Limit sample query to first 20 columns to avoid huge outputs for wide tables
+      const cols = table.columns as Array<{ name: string }>;
+      const colNames = cols.slice(0, 20).map((c) => `"${c.name}"`).join(', ');
       const sampleResult = await executeRawSQL(
         connection,
-        `SELECT * FROM "${tableName}" LIMIT 5`,
+        `SELECT ${colNames} FROM "${tableName}" LIMIT 5`,
       );
       return {
         table: tableName,
         columns: table.columns,
         sampleRows: (sampleResult as { rows?: unknown[] }).rows ?? [],
+        ...(cols.length > 20 ? { note: `Showing 20 of ${cols.length} columns in samples` } : {}),
       } as unknown as Record<string, unknown>;
     },
     saveSchemaDoc: async (_srcId: string, document: string) => {
@@ -232,7 +218,7 @@ export const POST = withAuth(async (req, { db, orgId }) => {
 
   console.log(`[Chat] Mode: ${wantsStream ? 'SSE streaming' : 'JSON'}, session=${sessionId}`);
   if (wantsStream) {
-    return handleStreaming(leader, message, orgId, sessionId);
+    return handleStreaming(leader, message, orgId, sessionId, sourcesNeedingBootstrap, adminDb, agentDataSources);
   }
 
   return handleNonStreaming(leader, message, orgId, sessionId);
@@ -357,6 +343,9 @@ function handleStreaming(
   message: string,
   orgId: string,
   sessionId: string,
+  sourcesNeedingBootstrap: Array<{ id: string; name: string; config: unknown }>,
+  adminDb: ReturnType<typeof getAdminDb>,
+  agentDataSources: AgentDataSource[],
 ): Response {
   const encoder = new TextEncoder();
   const abort = new AbortController();
@@ -389,6 +378,36 @@ function handleStreaming(
       }, 15_000);
 
       try {
+        // Run schema bootstrap inside the stream (avoids HTTP timeout)
+        if (sourcesNeedingBootstrap.length > 0) {
+          for (const s of sourcesNeedingBootstrap) {
+            if (abort.signal.aborted) break;
+            enqueue('status', { text: `Preparing schema for "${s.name}"...` });
+            try {
+              const connection = await getDataSourceConnection(adminDb, orgId, s.id);
+              console.log(`[Chat] Bootstrapping schema context for "${s.name}"...`);
+              const start = performance.now();
+              const schemaContext = await generateSchemaContext(connection);
+              console.log(`[Chat] Schema bootstrap complete (${Math.round(performance.now() - start)}ms, ${schemaContext.tables.length} tables)`);
+
+              // Cache to DB
+              const config = (s.config as Record<string, unknown>) ?? {};
+              const updatedConfig = { ...config, schemaContext };
+              await adminDb
+                .update(dataSources)
+                .set({ config: updatedConfig, updatedAt: new Date() })
+                .where(eq(dataSources.id, s.id));
+
+              // Update the agentDataSources in-memory so the leader uses it
+              const ds = agentDataSources.find((d) => d.id === s.id);
+              if (ds) ds.schemaContext = schemaContext as unknown as Record<string, unknown>;
+            } catch (err) {
+              console.error(`[Chat] Schema bootstrap failed for "${s.name}":`, err instanceof Error ? err.message : err);
+            }
+          }
+          enqueue('status', { text: '' }); // Clear status
+        }
+
         const timeoutPromise = new Promise<never>((_, reject) => {
           setTimeout(() => reject(new Error('Agent processing timed out')), AGENT_TIMEOUT_MS);
         });

@@ -91,9 +91,6 @@ export class ToolRouter {
       }
     }
 
-    // Log raw input for debugging
-    console.log(`[ToolRouter] Raw input: ${JSON.stringify(normalizedInput).slice(0, 300)}`);
-
     // Log tool call with compact input summary
     const inputSummary = toolName === 'run_sql'
       ? `sql=${JSON.stringify((normalizedInput as Record<string, unknown>).sql)}`

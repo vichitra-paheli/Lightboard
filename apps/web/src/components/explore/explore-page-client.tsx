@@ -158,6 +158,19 @@ export function ExplorePageClient() {
               );
               break;
 
+            case 'status':
+              // Server-side status updates (e.g. schema bootstrap progress)
+              if (data.text) {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantMsgId
+                      ? { ...m, content: data.text }
+                      : m,
+                  ),
+                );
+              }
+              break;
+
             case 'tool_start': {
               const newToolCall: ToolCallData = {
                 name: data.name,
