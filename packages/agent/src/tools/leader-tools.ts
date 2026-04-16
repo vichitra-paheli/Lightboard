@@ -82,7 +82,9 @@ export const leaderTools: ToolDefinition[] = [
     description:
       'Wait for one or more dispatched tasks to complete and collect their results. ' +
       'Returns a map of task_id → { success, summary, data_summary (for queries), explanation }. ' +
-      'Unknown or timed-out task ids come back as errors — the others complete normally.',
+      'Unknown or timed-out task ids come back as errors — the others complete normally. ' +
+      'IMPORTANT next-step rule: if any returned task was a successful QUERY and you have not yet called dispatch_view for that data, ' +
+      'your very next action MUST be dispatch_view. Do not end the turn on a query result — the user needs a rendered visualization, not just your text summary.',
     inputSchema: {
       type: 'object',
       properties: {
