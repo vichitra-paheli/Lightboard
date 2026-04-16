@@ -24,6 +24,7 @@ import { ChatPanel } from './chat-panel';
 import type { ChatMessageData, ToolCallData, AgentIndicatorData } from './chat-message';
 import { DataSourceSelector, type DataSourceOption } from './data-source-selector';
 import { SchemaCurationPanel } from './schema-curation-panel';
+import { ViewFilmstrip } from './view-filmstrip';
 import { parseSSE } from '@/lib/sse-parser';
 
 /**
@@ -38,6 +39,8 @@ export function ExplorePageClient() {
   const [selectedSource, setSelectedSource] = useState<string | null>(null);
   const [currentView, setCurrentView] = useState<ViewSpec | HtmlView | null>(null);
   const [viewData, setViewData] = useState<Record<string, unknown>[] | null>(null);
+  const [viewHistory, setViewHistory] = useState<HtmlView[]>([]);
+  const [activeViewIndex, setActiveViewIndex] = useState(-1);
 
   /** Type guard: HTML views have an `html` property. */
   const isHtmlView = (view: ViewSpec | HtmlView): view is HtmlView => 'html' in view;
@@ -267,8 +270,10 @@ export function ExplorePageClient() {
             case 'view_created':
               if (data.viewSpec) {
                 setCurrentView(data.viewSpec);
-                // HTML views have data embedded — no need to fetch
+                // Track HTML views in history for filmstrip
                 if (data.viewSpec.html) {
+                  setViewHistory((prev) => [...prev, data.viewSpec as HtmlView]);
+                  setActiveViewIndex(-1); // -1 = latest (will be set to length after render)
                   setViewData(null);
                 } else if (data.queryResult?.rows) {
                   setViewData(data.queryResult.rows);
@@ -526,6 +531,8 @@ export function ExplorePageClient() {
     setMessages([]);
     setCurrentView(null);
     setViewData(null);
+    setViewHistory([]);
+    setActiveViewIndex(-1);
     setConversationId(null);
   }, [handleStop]);
 
@@ -556,7 +563,8 @@ export function ExplorePageClient() {
           </div>
 
           {/* Right: View or Schema Curation */}
-          <div className="flex-1 overflow-auto">
+          <div className="flex flex-1 flex-col overflow-hidden">
+            <div className="flex-1 overflow-auto">
             {currentView && isHtmlView(currentView) ? (
               <HtmlViewRenderer
                 view={currentView}
@@ -594,6 +602,16 @@ export function ExplorePageClient() {
                 </div>
               </div>
             )}
+            </div>
+            {/* View filmstrip */}
+            <ViewFilmstrip
+              views={viewHistory}
+              activeIndex={activeViewIndex === -1 ? viewHistory.length - 1 : activeViewIndex}
+              onSelect={(i) => {
+                setActiveViewIndex(i);
+                if (viewHistory[i]) setCurrentView(viewHistory[i]);
+              }}
+            />
           </div>
         </div>
       </div>

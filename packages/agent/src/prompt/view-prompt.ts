@@ -56,9 +56,28 @@ Use create_view with:
 - [ ] Responsive: works at 400px-1200px width
 - [ ] No scrollbars unless data table has many rows
 
+## PNG Export
+
+Include a small download button (top-right corner, semi-transparent) that exports the visualization as PNG:
+
+\`\`\`html
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<button id="download-btn" style="position:fixed;top:8px;right:8px;padding:4px 12px;font-size:12px;background:rgba(255,255,255,0.1);color:#e4e4e7;border:1px solid rgba(255,255,255,0.2);border-radius:4px;cursor:pointer;z-index:100">⬇ PNG</button>
+<script>
+document.getElementById('download-btn').onclick=function(){
+  this.style.display='none';
+  html2canvas(document.body,{backgroundColor:'#0a0a0f'}).then(function(c){
+    var a=document.createElement('a');a.href=c.toDataURL('image/png');a.download='chart.png';a.click();
+    document.getElementById('download-btn').style.display='';
+  });
+};
+</script>
+\`\`\`
+
 ## Rules
 
 - Always include title and description in the create_view call
 - Use create_view for new visualizations, modify_view for changes
 - The HTML must render correctly in a sandboxed iframe
-- Do NOT use document.cookie, localStorage, or fetch — the iframe is sandboxed`;
+- Do NOT use document.cookie, localStorage, or fetch — the iframe is sandboxed
+- Always include the PNG download button and html2canvas script`;
