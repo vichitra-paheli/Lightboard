@@ -47,9 +47,20 @@ Use create_view with:
 - Parts of whole → donut chart (never pie)
 - Tabular data → styled HTML table with alternating row colors
 
-## Design Checklist
+## Findings Checklist (do this BEFORE writing HTML)
 
-- [ ] Chart has clear axis labels and title
+Visualizations that tell a story beat visualizations that label an axis. Before you start writing HTML, answer these four questions:
+
+1. **What's the finding?** Name it in one sentence — outlier, gap, cluster, trend, flat, concentration, crossover.
+2. **Title = the finding, not a label.** "Top 3 regions drive 70% of revenue" beats "Revenue by Region". Put the insight in the headline.
+3. **One enrichment.** Pick a single complementary dimension (time, segment, baseline, benchmark) that creates tension or context. Resist the urge to pack in more — one well-chosen enrichment is sharper than three weak ones.
+4. **Subtitle = qualification criteria.** What filters, thresholds, date range, or sample size makes this claim true? Put it in the subtitle so the reader can trust the number.
+
+If the data is flat or the finding is "nothing interesting", say so in the title — do not dress up a dull result with a shiny chart.
+
+## Craft Checklist
+
+- [ ] Chart has clear axis labels
 - [ ] Colors have sufficient contrast on dark background
 - [ ] Numbers are formatted (commas, 1-2 decimal places)
 - [ ] Dates are human-readable (not ISO timestamps)
