@@ -101,6 +101,7 @@ export class QueryAgent implements SubAgent {
       // Execute tool calls
       const toolResults = [];
       for (const tc of toolCalls) {
+        this.emitStatus(describeQueryToolCall(tc.name, tc.input));
         const result = await this.config.toolRouter.execute(tc.name, tc.input);
         toolResults.push({
           toolCallId: tc.id,
@@ -111,6 +112,7 @@ export class QueryAgent implements SubAgent {
         if (!result.isError) {
           try {
             lastQueryResult = JSON.parse(result.content) as Record<string, unknown>;
+            this.emitStatus(describeQueryResult(tc.name, lastQueryResult));
           } catch {
             lastQueryResult = { raw: result.content };
           }
@@ -132,4 +134,46 @@ export class QueryAgent implements SubAgent {
       error: 'max_tool_rounds',
     };
   }
+
+  /** Safely emit a progress string if a callback is wired. */
+  private emitStatus(message: string): void {
+    this.config.onStatus?.(message);
+  }
+}
+
+/** Produce a short "about to call X" status string for a query-agent tool call. */
+function describeQueryToolCall(name: string, input: Record<string, unknown>): string {
+  if (name === 'run_sql') {
+    const sql = String(input.sql ?? '').replace(/\s+/g, ' ').trim();
+    return `Running query: ${sql.length > 80 ? `${sql.slice(0, 77)}...` : sql}`;
+  }
+  if (name === 'describe_table') {
+    return `Inspecting table: ${String(input.table_name ?? 'unknown')}`;
+  }
+  if (name === 'check_query_hints') {
+    return 'Validating query against sampled values…';
+  }
+  if (name === 'get_schema') {
+    return 'Fetching schema…';
+  }
+  return `Calling ${name}…`;
+}
+
+/** Produce a short "returned X" status string from a tool result payload. */
+function describeQueryResult(name: string, result: Record<string, unknown>): string {
+  if (name === 'run_sql') {
+    const rowCount = (result.rowCount as number | undefined)
+      ?? (Array.isArray(result.rows) ? (result.rows as unknown[]).length : undefined);
+    if (typeof rowCount === 'number') {
+      return `Got ${rowCount.toLocaleString()} row${rowCount === 1 ? '' : 's'}`;
+    }
+  }
+  if (name === 'check_query_hints') {
+    const warnings = Array.isArray(result.warnings) ? (result.warnings as unknown[]).length : 0;
+    return warnings === 0 ? 'Query passed validation' : `Query validation: ${warnings} warning(s)`;
+  }
+  if (name === 'describe_table') {
+    return 'Table inspected';
+  }
+  return `${name} finished`;
 }

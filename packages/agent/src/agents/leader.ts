@@ -293,9 +293,12 @@ export class LeaderAgent {
       role,
       instruction,
       run: async (signal) => {
-        const outcome = await this.runSubAgentTask(role, input, conversationId, signal);
-        // When the task settles, queue a task_progress tick so the UI can
-        // update even before the model calls await_tasks.
+        const onStatus = (message: string): void => {
+          this.pendingEvents.push({ type: 'task_progress', taskId, message });
+        };
+        const outcome = await this.runSubAgentTask(role, input, conversationId, signal, onStatus);
+        // When the task settles, queue a final task_progress tick so the UI
+        // can update even before the model calls await_tasks.
         this.pendingEvents.push({
           type: 'task_progress',
           taskId,
@@ -404,7 +407,10 @@ export class LeaderAgent {
 
     try {
       yield { type: 'agent_start', agent: role, task: instruction };
-      const outcome = await this.runSubAgentTask(role, input, conversationId);
+      const onStatus = (message: string): void => {
+        this.pendingEvents.push({ type: 'status', scope: role, message });
+      };
+      const outcome = await this.runSubAgentTask(role, input, conversationId, undefined, onStatus);
       const summary = outcome.result.success
         ? outcome.result.explanation || `${role} task completed`
         : `${role} task failed: ${outcome.result.error ?? 'unknown error'}`;
@@ -446,6 +452,7 @@ export class LeaderAgent {
     input: Record<string, unknown>,
     conversationId: string,
     _signal?: AbortSignal,
+    onStatus?: (message: string) => void,
   ): Promise<SubAgentRunOutcome> {
     const instruction = (input.instruction as string)
       || this.getLastUserMessage()
@@ -460,6 +467,7 @@ export class LeaderAgent {
         provider: this.provider,
         toolRouter: queryRouter,
         maxToolRounds: this.subAgentMaxRounds,
+        onStatus,
       });
 
       const task: AgentTask = {
@@ -492,6 +500,7 @@ export class LeaderAgent {
         provider: this.provider,
         toolRouter: viewRouter,
         maxToolRounds: this.subAgentMaxRounds,
+        onStatus,
       });
 
       let dataSummary = input.data_summary as Record<string, unknown> | undefined;
@@ -518,6 +527,7 @@ export class LeaderAgent {
       provider: this.provider,
       toolRouter: insightsRouter,
       maxToolRounds: this.subAgentMaxRounds,
+      onStatus,
     });
 
     const task: AgentTask = {

@@ -59,4 +59,11 @@ export interface SubAgentConfig {
   toolRouter: ToolRouter;
   /** Maximum tool call rounds before giving up (default varies by agent). */
   maxToolRounds?: number;
+  /**
+   * Optional progress callback. Sub-agents invoke this with short, human-
+   * readable status strings ("Running query: SELECT ...", "Got 1250 rows")
+   * so the leader can surface task_progress events to the UI during long
+   * tool calls. Safe to omit.
+   */
+  onStatus?: (message: string) => void;
 }
