@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { ToolDefinition } from '../provider/types';
 
 import { DEFAULT_ROW_LIMIT, ensureLimit } from './constants';
+import { checkQueryHints, type HintSchemaContext } from './query-hints';
 
 /** Context provided to tool handlers for accessing services. */
 export interface ToolContext {
@@ -18,6 +19,12 @@ export interface ToolContext {
   getCurrentView?: () => Record<string, unknown> | null;
   /** Execute DuckDB SQL on the session scratchpad for statistical analysis. */
   analyzeData?: (sql: string) => Promise<Record<string, unknown>>;
+  /**
+   * Return the enriched schema context for a data source (sampleValues, date
+   * ranges, etc.). Used by `check_query_hints` to validate proposed SQL
+   * before execution.
+   */
+  getSchemaContext?: (sourceId: string) => Promise<Record<string, unknown> | null>;
 }
 
 /** Result of a tool execution. */
@@ -56,6 +63,10 @@ const toolInputSchemas = {
     source_id: z.string().min(1),
     sql: z.string().min(1),
   }),
+  check_query_hints: z.object({
+    source_id: z.string().min(1),
+    sql: z.string().min(1),
+  }),
   analyze_data: z.object({
     sql: z.string().min(1),
     description: z.string().optional(),
@@ -76,7 +87,7 @@ export class ToolRouter {
     this.context = context;
     this.allowedTools = toolDefinitions
       ? new Set(toolDefinitions.map((t) => t.name))
-      : new Set(['get_schema', 'run_sql', 'describe_table', 'propose_schema_doc', 'create_view', 'modify_view']);
+      : new Set(['get_schema', 'run_sql', 'describe_table', 'check_query_hints', 'propose_schema_doc', 'create_view', 'modify_view']);
   }
 
   /** Execute a tool call and return the result. Errors are returned, not thrown. */
@@ -118,6 +129,9 @@ export class ToolRouter {
           break;
         case 'run_sql':
           result = await this.handleRunSQL(normalizedInput);
+          break;
+        case 'check_query_hints':
+          result = await this.handleCheckQueryHints(normalizedInput);
           break;
         case 'create_view':
           result = await this.handleCreateView(normalizedInput);
@@ -261,6 +275,30 @@ export class ToolRouter {
     const safeSql = ensureLimit(parsed.data.sql, DEFAULT_ROW_LIMIT);
     const result = await this.context.runSQL(parsed.data.source_id, safeSql);
     return { content: JSON.stringify(result, null, 2), isError: false };
+  }
+
+  /**
+   * Handle check_query_hints — lint the proposed SQL against sampled enum
+   * values in the enriched schema context. Returns warnings, never throws.
+   * Requires `getSchemaContext` on the ToolContext; if missing, the tool
+   * degrades to an "ok: true, no warnings" result.
+   */
+  private async handleCheckQueryHints(input: Record<string, unknown>): Promise<ToolExecutionResult> {
+    const parsed = toolInputSchemas.check_query_hints.safeParse(input);
+    if (!parsed.success) {
+      return { content: `Invalid input for check_query_hints: ${parsed.error.message}`, isError: true };
+    }
+
+    if (!this.context.getSchemaContext) {
+      return {
+        content: JSON.stringify({ ok: true, warnings: [], note: 'check_query_hints unavailable (no schema context on this source)' }),
+        isError: false,
+      };
+    }
+
+    const context = (await this.context.getSchemaContext(parsed.data.source_id)) as HintSchemaContext | null;
+    const result = checkQueryHints(parsed.data.sql, context);
+    return { content: JSON.stringify(result), isError: false };
   }
 
   /** Handle analyze_data tool call — DuckDB analytics on the scratchpad. */

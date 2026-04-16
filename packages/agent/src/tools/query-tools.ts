@@ -44,6 +44,28 @@ export const queryTools: ToolDefinition[] = [
     },
   },
   {
+    name: 'check_query_hints',
+    description:
+      'Lint a proposed SQL statement against the sampled enum values captured during schema bootstrap. ' +
+      'Returns `{ ok, warnings }` where each warning names a column + literal value that was not seen in the samples, ' +
+      'plus suggested alternatives. Call this BEFORE `run_sql` whenever you are filtering on a column whose allowed ' +
+      'values you are not 100% sure of — it is cheap and catches typos (\'T-20\' vs \'T20\', wrong case, stale enums).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        source_id: {
+          type: 'string',
+          description: 'The data source whose schema context to validate against',
+        },
+        sql: {
+          type: 'string',
+          description: 'The proposed SQL statement to lint (same string you would pass to run_sql)',
+        },
+      },
+      required: ['source_id', 'sql'],
+    },
+  },
+  {
     name: 'run_sql',
     description:
       'Execute a read-only SELECT SQL query against a data source. ' +

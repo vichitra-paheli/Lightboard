@@ -179,6 +179,12 @@ export const POST = withAuth(async (req, { db, orgId }) => {
       // The frontend will show it in the editor; the user saves via PUT /api/data-sources/[id]/schema.
       console.log(`[Chat] Schema doc proposed: ${document.length} chars (awaiting user review)`);
     },
+    getSchemaContext: async (srcId: string) => {
+      // Feeds check_query_hints. Returns the enriched context from bootstrap
+      // (tables → sampleValues, date ranges) for the requested source.
+      const ds = agentDataSources.find((d) => d.id === srcId);
+      return (ds?.schemaContext as Record<string, unknown> | undefined) ?? null;
+    },
   };
 
   // Generate or reuse conversation/session ID
