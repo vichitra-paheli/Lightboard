@@ -15,6 +15,22 @@
  * force `stroke-dashoffset: 0` so the wordmark appears instantly.
  */
 
+/*
+ * Keyframe is declared locally inside the CSS module so the scoped
+ * `animation-name` reference resolves. CSS Modules scopes keyframe names the
+ * same way it scopes class names — referencing a globally-declared `sigilDraw`
+ * from inside the module leaves the animation pointing at a non-existent name
+ * and the draw-in silently fails to run.
+ */
+@keyframes sigilDraw {
+  from {
+    stroke-dashoffset: 50;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
 .root {
   display: block;
   overflow: visible;
@@ -30,6 +46,9 @@
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-dasharray: 50;
+  /* Explicit initial hidden state — protects against a brief flash of the
+   * fully-drawn letter before animation-fill-mode: both kicks in. */
+  stroke-dashoffset: 50;
   animation: sigilDraw var(--dur-sigil, 900ms) var(--ease-draw, cubic-bezier(0.6, 0.1, 0.2, 1)) both;
   animation-delay: var(--sigil-delay, 0ms);
 }
