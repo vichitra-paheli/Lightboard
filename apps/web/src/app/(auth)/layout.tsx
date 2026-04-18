@@ -8,7 +8,7 @@ export default async function AuthLayout({ children }: { children: React.ReactNo
 
   return (
     <NextIntlClientProvider locale={locale} messages={messages}>
-      <div className="flex min-h-screen items-center justify-center" style={{ backgroundColor: 'var(--color-muted)' }}>
+      <div className="flex min-h-screen items-center justify-center bg-background">
         {children}
       </div>
     </NextIntlClientProvider>
