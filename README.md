@@ -10,13 +10,12 @@ Lightboard is a TypeScript monorepo built with Turborepo and pnpm workspaces.
 lightboard/
 ├── apps/web/              # Next.js 15 (app router) — main application
 ├── packages/
-│   ├── db/                # Drizzle ORM schema, auth, migrations
-│   ├── ui/                # shadcn/ui component library
-│   ├── connector-sdk/     # Data source adapter interface
-│   ├── query-ir/          # Query intermediate representation
-│   ├── compute/           # DuckDB + Apache Arrow pipeline
-│   ├── viz-core/          # visx chart components
-│   └── agent/             # AI agent with tool use
+│   ├── agent/             # Multi-agent orchestration (leader + specialists)
+│   ├── connector-sdk/     # Data source adapter interface (JSON rows)
+│   ├── connectors/        # Postgres connector
+│   ├── db/                # Drizzle schema, auth, migrations
+│   ├── telemetry/         # OpenTelemetry SDK + built-in data source
+│   └── ui/                # shadcn/ui component library
 ├── docker/                # Docker Compose for local dev
 └── e2e/                   # Playwright E2E tests
 ```
@@ -26,13 +25,13 @@ lightboard/
 | Layer | Technology |
 |-------|-----------|
 | Framework | Next.js 15 (app router, Turbopack) |
-| UI | shadcn/ui + Tailwind CSS v4 |
-| Visualization | visx + d3 |
+| UI | shadcn/ui + Tailwind CSS v4 (dark-only, design-system tokens) |
+| Typography | Space Grotesk · Inter · JetBrains Mono |
+| Visualization | Agent-generated HTML in a sandboxed iframe |
 | State | Zustand (client), @tanstack/react-query (server) |
 | ORM | Drizzle ORM + PostgreSQL |
 | Auth | Session-based (Argon2 + oslo) |
 | i18n | next-intl |
-| Compute | DuckDB (native + WASM) + Apache Arrow |
 | Testing | Vitest + Playwright + Testing Library |
 
 ## Getting Started
