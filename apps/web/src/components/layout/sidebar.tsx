@@ -1,87 +1,73 @@
 'use client';
 
-import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Link } from 'next-view-transitions';
-import {
-  Compass,
-  Database,
-  LayoutDashboard,
-  LogOut,
-  type LucideIcon,
-  Settings,
-  SquareKanban,
-} from 'lucide-react';
+import { useUiStore } from '@/stores/ui-store';
 import { cn } from '@/lib/utils';
 
 /**
- * Navigation item definition for the sidebar.
+ * Props for {@link Sidebar}.
  */
-interface NavItem {
-  href: string;
-  labelKey: string;
-  icon: LucideIcon;
+export interface SidebarProps {
+  /**
+   * Per-route sidebar content. Each route that needs sidebar widgets
+   * (Explore's DB picker + conversations list, etc.) passes its own tree
+   * here via `AppShell`'s `sidebarSlot` prop. Routes that don't need a
+   * sidebar panel pass `undefined` — the container still renders so the
+   * collapse animation remains consistent.
+   */
+  children?: React.ReactNode;
 }
 
-const NAV_ITEMS: NavItem[] = [
-  { href: '/', labelKey: 'home', icon: LayoutDashboard },
-  { href: '/explore', labelKey: 'explore', icon: Compass },
-  { href: '/data-sources', labelKey: 'dataSources', icon: Database },
-  { href: '/views', labelKey: 'views', icon: SquareKanban },
-  { href: '/settings', labelKey: 'settings', icon: Settings },
-];
-
 /**
- * Application sidebar with navigation links.
- * Renders instantly from static content — no loading states.
+ * Collapsible 240px left sidebar. Primary nav was removed in PR 3 (it lives
+ * in the centered top bar now); this container is now purely a slot + a
+ * logout footer.
+ *
+ * When `sidebarOpen` is `false` the sidebar collapses to `width: 0` with
+ * `overflow: hidden` — a full hide, not an icon rail. The width + border
+ * transition uses `--ease-out-quint` over 280ms so collapse feels coherent
+ * with the rest of the shell motion.
  */
-export function Sidebar() {
-  const pathname = usePathname();
+export function Sidebar({ children }: SidebarProps) {
   const t = useTranslations('nav');
+  const open = useUiStore((s) => s.sidebarOpen);
 
   async function handleLogout() {
     await fetch('/api/auth/logout', { method: 'POST' });
-    // Use hard navigation to clear all client state and let middleware redirect
+    // Use hard navigation to clear all client state and let middleware redirect.
     window.location.href = '/login';
   }
 
   return (
-    <aside className="flex h-screen w-60 flex-col border-r border-sidebar-border bg-sidebar">
-      <div className="flex h-14 items-center border-b border-sidebar-border px-4">
-        <Link href="/" className="text-lg font-semibold text-sidebar-foreground">
-          Lightboard
-        </Link>
+    <aside
+      aria-label="Sidebar"
+      data-open={open ? 'true' : 'false'}
+      className={cn(
+        'flex h-full flex-none flex-col overflow-y-auto',
+        // Collapsed: width 0, hidden content, transparent border so the
+        // top-bar's bottom-border remains continuous across the edge.
+        !open && 'overflow-hidden',
+      )}
+      style={{
+        width: open ? 240 : 0,
+        background: 'var(--bg-1)',
+        borderRight: open ? '1px solid var(--line-1)' : '1px solid transparent',
+        padding: open ? '16px 14px' : '16px 0',
+        gap: 16,
+        transition:
+          'width 280ms var(--ease-out-quint), border-color 280ms var(--ease-out-quint), padding 280ms var(--ease-out-quint)',
+      }}
+    >
+      <div className="flex min-h-0 flex-1 flex-col gap-4">
+        {children}
       </div>
 
-      <nav className="flex-1 space-y-1 p-2">
-        {NAV_ITEMS.map((item) => {
-          const isActive = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href);
-          const Icon = item.icon;
-
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
-                isActive
-                  ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-                  : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground',
-              )}
-            >
-              <Icon className="h-4 w-4" />
-              {t(item.labelKey)}
-            </Link>
-          );
-        })}
-      </nav>
-
-      <div className="border-t border-sidebar-border p-2">
+      <div className="flex-none pt-2">
         <button
           onClick={handleLogout}
-          className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+          className="rounded-md px-1 py-1 text-left text-[12.5px] text-[var(--ink-3)] transition-colors hover:text-[var(--ink-1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-warm)]"
+          style={{ fontFamily: 'var(--font-body), Inter, system-ui, sans-serif' }}
         >
-          <LogOut className="h-4 w-4" />
           {t('logout')}
         </button>
       </div>

@@ -12,11 +12,16 @@
   },
   "nav": {
     "home": "Home",
+    "dashboard": "Dashboard",
     "explore": "Explore",
-    "dataSources": "Data Sources",
     "views": "Views",
     "settings": "Settings",
     "logout": "Log out"
+  },
+  "topBar": {
+    "toggleSidebar": "Toggle sidebar",
+    "changeModel": "Change model",
+    "primaryNav": "Primary navigation"
   },
   "home": {
     "title": "Welcome to Lightboard",

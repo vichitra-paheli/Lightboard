@@ -17,7 +17,7 @@ export default function SigilPreviewPage() {
 
   return (
     <div
-      className="min-h-[calc(100vh-56px)] -m-6 p-10 flex flex-col gap-10"
+      className="min-h-[calc(100vh-56px)] p-10 flex flex-col gap-10"
       style={{ backgroundColor: 'var(--bg-0)' }}
     >
       <header className="flex flex-col gap-2">
