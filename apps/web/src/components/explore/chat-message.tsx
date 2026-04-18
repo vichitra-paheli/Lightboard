@@ -4,6 +4,8 @@ import { MarkdownRenderer } from '@/components/chat/markdown-renderer';
 import { ThinkingState } from '@/components/chat/thinking-state';
 import { ToolCallDetails, type ToolCallData } from '@/components/chat/tool-call-details';
 import { AgentIndicator, type AgentIndicatorData } from '@/components/chat/agent-indicator';
+import type { ViewSpec } from '@lightboard/viz-core';
+import type { HtmlView } from '@/components/view-renderer';
 
 export type { ToolCallData, AgentIndicatorData };
 
@@ -19,6 +21,21 @@ export interface ChatMessageData {
   /** Sub-agent delegation indicators. */
   agentDelegations?: AgentIndicatorData[];
   isStreaming?: boolean;
+  /**
+   * Optional chart produced by this assistant message. Rendered inline
+   * inside the turn (see {@link /components/explore/turn.tsx}). Populated
+   * by `ExplorePageClient` when a `view_created` SSE event arrives. Remains
+   * `undefined` on user messages and on assistant messages that did not
+   * produce a chart. This field was added without migrating the message
+   * model to `parts[]` — that refactor ships in PR 5.
+   */
+  view?: ViewSpec | HtmlView;
+  /**
+   * Data rows for the legacy ViewSpec renderer path. Ignored when
+   * {@link ChatMessageData.view} is an `HtmlView` (HTML views embed their
+   * own data).
+   */
+  viewData?: Record<string, unknown>[] | null;
 }
 
 /** Props for ChatMessage. */

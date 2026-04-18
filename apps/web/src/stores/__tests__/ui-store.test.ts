@@ -6,12 +6,16 @@ describe('useUiStore', () => {
     // Reset to the initial state before each test so prior toggles don't leak
     // between cases. Zustand `create()` memoizes per-module, so the same
     // store instance is reused across tests.
-    useUiStore.setState({ sidebarOpen: true });
+    useUiStore.setState({ sidebarOpen: true, sidebarSlot: null });
     window.localStorage.clear();
   });
 
   it('defaults sidebarOpen to true', () => {
     expect(useUiStore.getState().sidebarOpen).toBe(true);
+  });
+
+  it('defaults sidebarSlot to null', () => {
+    expect(useUiStore.getState().sidebarSlot).toBeNull();
   });
 
   it('toggleSidebar flips sidebarOpen', () => {
@@ -37,6 +41,17 @@ describe('useUiStore', () => {
     expect(useUiStore.getState().sidebarOpen).toBe(true);
   });
 
+  it('setSidebarSlot installs a node and clears on null', () => {
+    const { setSidebarSlot } = useUiStore.getState();
+    const slot = 'hello' as unknown as React.ReactNode;
+
+    setSidebarSlot(slot);
+    expect(useUiStore.getState().sidebarSlot).toBe(slot);
+
+    setSidebarSlot(null);
+    expect(useUiStore.getState().sidebarSlot).toBeNull();
+  });
+
   it("persists to localStorage under 'lb:ui'", () => {
     // Toggle to dirty the state, then read localStorage through the key used
     // by the persist middleware. Zustand stores a JSON envelope shaped like
@@ -47,5 +62,16 @@ describe('useUiStore', () => {
     expect(raw).not.toBeNull();
     const parsed = JSON.parse(raw as string);
     expect(parsed.state.sidebarOpen).toBe(false);
+  });
+
+  it('does not persist sidebarSlot', () => {
+    // sidebarSlot holds React nodes and must never round-trip through JSON —
+    // the partialize filter drops it from the persisted envelope.
+    useUiStore.getState().setSidebarSlot('anything' as unknown as React.ReactNode);
+
+    const raw = window.localStorage.getItem('lb:ui');
+    expect(raw).not.toBeNull();
+    const parsed = JSON.parse(raw as string);
+    expect(parsed.state).not.toHaveProperty('sidebarSlot');
   });
 });

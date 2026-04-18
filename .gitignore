@@ -53,3 +53,13 @@ Modelfile
 
 # Large sample datasets — keep local only
 sample_data/
+
+# Design handoff bundle (kept local for reference; not part of app source)
+Lightboard-handoff/
+Lightboard-handoff.zip
+
+# Sample data + compose stack for the cricket analytics fixture (local only)
+docker/cricket-analytics/
+
+# One-off prompt scratch file used during development
+sample_prompt.txt

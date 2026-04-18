@@ -12,38 +12,52 @@ import {
 import { useTranslations } from 'next-intl';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-// Register chart panel plugins on module load
+// Register chart panel plugins on module load so legacy ViewSpec paths
+// continue to render charts for conversations that haven't migrated to the
+// agent-generated HTML output yet.
 if (!defaultPanelRegistry.has('bar-chart')) {
-  defaultPanelRegistry.register(barChartPlugin as unknown as Parameters<typeof defaultPanelRegistry.register>[0]);
-  defaultPanelRegistry.register(timeSeriesLinePlugin as unknown as Parameters<typeof defaultPanelRegistry.register>[0]);
-  defaultPanelRegistry.register(statCardPlugin as unknown as Parameters<typeof defaultPanelRegistry.register>[0]);
-  defaultPanelRegistry.register(dataTablePlugin as unknown as Parameters<typeof defaultPanelRegistry.register>[0]);
+  defaultPanelRegistry.register(
+    barChartPlugin as unknown as Parameters<typeof defaultPanelRegistry.register>[0],
+  );
+  defaultPanelRegistry.register(
+    timeSeriesLinePlugin as unknown as Parameters<typeof defaultPanelRegistry.register>[0],
+  );
+  defaultPanelRegistry.register(
+    statCardPlugin as unknown as Parameters<typeof defaultPanelRegistry.register>[0],
+  );
+  defaultPanelRegistry.register(
+    dataTablePlugin as unknown as Parameters<typeof defaultPanelRegistry.register>[0],
+  );
 }
-import { ViewRenderer, HtmlViewRenderer, type HtmlView } from '@/components/view-renderer';
-import { ChatPanel } from './chat-panel';
+
+import type { HtmlView } from '@/components/view-renderer';
+import { useUiStore } from '@/stores/ui-store';
 import type { ChatMessageData, ToolCallData, AgentIndicatorData } from './chat-message';
-import { DataSourceSelector, type DataSourceOption } from './data-source-selector';
-import { SchemaCurationPanel } from './schema-curation-panel';
+import { Composer } from './composer';
+import type { DataSourceOption } from './types';
+import { ExploreSidebar } from './sidebar/explore-sidebar';
+import { Thread } from './thread';
 import { ViewFilmstrip } from './view-filmstrip';
 import { parseSSE } from '@/lib/sse-parser';
 
 /**
- * Client-side Explore page component.
- * Split panel: chat on the left, view renderer on the right.
- * Supports SSE streaming for real-time agent responses.
+ * Client-side Explore page. Centered-thread model: sidebar slot hosts the DB
+ * picker + conversations list + new-chat button, the main area is a stacked
+ * Thread + Composer. Charts render inline in the thread inside each turn's
+ * `InlineChartFrame`, not in a right panel.
+ *
+ * The legacy `ViewFilmstrip` is kept imported and rendered with `hidden`
+ * so PR 6 can swap it for the right slide-out without a risky PR-4 revert
+ * leaving a dangling import. The filmstrip still receives fresh
+ * `viewHistory` so the PR 6 swap is a pure UI change.
  */
 export function ExplorePageClient() {
   const t = useTranslations('explore');
   const [messages, setMessages] = useState<ChatMessageData[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [selectedSource, setSelectedSource] = useState<string | null>(null);
-  const [currentView, setCurrentView] = useState<ViewSpec | HtmlView | null>(null);
-  const [viewData, setViewData] = useState<Record<string, unknown>[] | null>(null);
   const [viewHistory, setViewHistory] = useState<HtmlView[]>([]);
   const [activeViewIndex, setActiveViewIndex] = useState(-1);
-
-  /** Type guard: HTML views have an `html` property. */
-  const isHtmlView = (view: ViewSpec | HtmlView): view is HtmlView => 'html' in view;
   const [dataSources, setDataSources] = useState<DataSourceOption[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [schemaCuration, setSchemaCuration] = useState<{
@@ -52,8 +66,14 @@ export function ExplorePageClient() {
   } | null>(null);
   const schemaGenerationTriggered = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const setSidebarSlot = useUiStore((s) => s.setSidebarSlot);
 
-  // Fetch data sources from API on mount
+  /**
+   * Fetch data sources on mount. Kept as a one-shot `fetch` so the Explore
+   * route renders without a react-query provider; migrating to react-query
+   * is tracked alongside the other server-state work and doesn't belong in
+   * this PR.
+   */
   useEffect(() => {
     async function loadSources() {
       try {
@@ -61,12 +81,19 @@ export function ExplorePageClient() {
         if (res.ok) {
           const data = await res.json();
           setDataSources(
-            data.dataSources.map((ds: { id: string; name: string; type: string; config?: Record<string, unknown> }) => ({
-              id: ds.id,
-              name: ds.name,
-              type: ds.type,
-              hasSchemaDoc: !!ds.config?.schemaDoc,
-            })),
+            data.dataSources.map(
+              (ds: {
+                id: string;
+                name: string;
+                type: string;
+                config?: Record<string, unknown>;
+              }) => ({
+                id: ds.id,
+                name: ds.name,
+                type: ds.type,
+                hasSchemaDoc: !!ds.config?.schemaDoc,
+              }),
+            ),
           );
         }
       } catch {
@@ -76,64 +103,85 @@ export function ExplorePageClient() {
     loadSources();
   }, []);
 
-  // Keyboard shortcuts
+  /**
+   * Cmd+K focuses the DB picker's dropdown trigger (moved into the shell
+   * sidebar in PR 4). The trigger carries a `data-db-picker-trigger`
+   * attribute so this selector doesn't have to know the underlying
+   * component class names.
+   */
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      // Cmd+K to focus data source selector
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
-        const select = document.querySelector<HTMLSelectElement>('[data-source-selector]');
-        select?.focus();
+        const trigger = document.querySelector<HTMLButtonElement>(
+          '[data-db-picker-trigger]',
+        );
+        trigger?.focus();
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  // Show schema curation callout when a source without schemaDoc is selected
+  /**
+   * Show the schema curation callout when a source without schemaDoc is
+   * picked, and suppress the callout once we've already triggered a
+   * generation run in this session. Also suppresses the callout while any
+   * view is active so new charts don't get hidden behind the setup UI.
+   */
   useEffect(() => {
     if (!selectedSource) {
       setSchemaCuration(null);
       schemaGenerationTriggered.current = false;
       return;
     }
-    // Don't re-show callout if generation was already triggered in this session
     if (schemaGenerationTriggered.current) return;
     const source = dataSources.find((s) => s.id === selectedSource);
-    if (source && !source.hasSchemaDoc && !currentView) {
+    // Suppress the callout if the most-recent assistant message already
+    // produced a view — showing it would flash a setup CTA on top of the
+    // user's results.
+    const hasView = messages.some((m) => m.role === 'assistant' && m.view);
+    if (source && !source.hasSchemaDoc && !hasView) {
       setSchemaCuration({ phase: 'callout', markdown: '' });
     } else {
       setSchemaCuration(null);
     }
-  }, [selectedSource, dataSources, currentView]);
+  }, [selectedSource, dataSources, messages]);
 
   /** Save the curated schema document. */
-  const handleSaveSchema = useCallback(async (markdown: string) => {
-    if (!selectedSource) return;
-    setSchemaCuration((prev) => prev ? { ...prev, phase: 'saving' } : null);
-    try {
-      const res = await fetch(`/api/data-sources/${selectedSource}/schema`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ schemaDoc: markdown }),
-      });
-      if (!res.ok) throw new Error('Save failed');
-      // Update local state so callout doesn't reappear
-      setDataSources((prev) =>
-        prev.map((ds) =>
-          ds.id === selectedSource ? { ...ds, hasSchemaDoc: true } : ds,
-        ),
-      );
-      setSchemaCuration(null);
-    } catch {
-      setSchemaCuration((prev) => prev ? { ...prev, phase: 'editing' } : null);
-    }
-  }, [selectedSource]);
+  const handleSaveSchema = useCallback(
+    async (markdown: string) => {
+      if (!selectedSource) return;
+      setSchemaCuration((prev) => (prev ? { ...prev, phase: 'saving' } : null));
+      try {
+        const res = await fetch(`/api/data-sources/${selectedSource}/schema`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ schemaDoc: markdown }),
+        });
+        if (!res.ok) throw new Error('Save failed');
+        setDataSources((prev) =>
+          prev.map((ds) =>
+            ds.id === selectedSource ? { ...ds, hasSchemaDoc: true } : ds,
+          ),
+        );
+        setSchemaCuration(null);
+      } catch {
+        setSchemaCuration((prev) => (prev ? { ...prev, phase: 'editing' } : null));
+      }
+    },
+    [selectedSource],
+  );
 
-  /** Consumes an SSE stream and updates messages progressively. */
+  /**
+   * Consumes an SSE stream and updates messages progressively.
+   * Attaches any `view_created` output directly onto the assistant message
+   * so `<Turn>` can render it inline in the thread.
+   */
   const consumeSSEStream = useCallback(
     async (response: Response, assistantMsgId: string) => {
       // Track the last successful query result from run_sql or execute_query
+      // — used as a data-rows fallback for legacy ViewSpec paths.
       let lastQueryRows: Record<string, unknown>[] | null = null;
 
       for await (const sseEvent of parseSSE(response)) {
@@ -162,13 +210,10 @@ export function ExplorePageClient() {
               break;
 
             case 'status':
-              // Server-side status updates (e.g. schema bootstrap progress)
               if (data.text) {
                 setMessages((prev) =>
                   prev.map((m) =>
-                    m.id === assistantMsgId
-                      ? { ...m, content: data.text }
-                      : m,
+                    m.id === assistantMsgId ? { ...m, content: data.text } : m,
                   ),
                 );
               }
@@ -183,10 +228,7 @@ export function ExplorePageClient() {
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === assistantMsgId
-                    ? {
-                        ...m,
-                        toolCalls: [...(m.toolCalls ?? []), newToolCall],
-                      }
+                    ? { ...m, toolCalls: [...(m.toolCalls ?? []), newToolCall] }
                     : m,
                 ),
               );
@@ -203,9 +245,15 @@ export function ExplorePageClient() {
                           tc.name === data.name && tc.status === 'running'
                             ? {
                                 ...tc,
-                                status: data.isError ? ('error' as const) : ('done' as const),
-                                ...(data.result !== undefined ? { result: String(data.result) } : {}),
-                                ...(data.durationMs !== undefined ? { durationMs: data.durationMs } : {}),
+                                status: data.isError
+                                  ? ('error' as const)
+                                  : ('done' as const),
+                                ...(data.result !== undefined
+                                  ? { result: String(data.result) }
+                                  : {}),
+                                ...(data.durationMs !== undefined
+                                  ? { durationMs: data.durationMs }
+                                  : {}),
                               }
                             : tc,
                         ),
@@ -213,14 +261,18 @@ export function ExplorePageClient() {
                     : m,
                 ),
               );
-              // Capture query results from run_sql or execute_query for chart rendering
-              if (!data.isError && (data.name === 'run_sql' || data.name === 'execute_query')) {
+              if (
+                !data.isError &&
+                (data.name === 'run_sql' || data.name === 'execute_query')
+              ) {
                 try {
                   const parsed = JSON.parse(data.result);
                   if (parsed.rows) {
                     lastQueryRows = parsed.rows;
                   }
-                } catch { /* ignore parse errors */ }
+                } catch {
+                  /* ignore parse errors */
+                }
               }
               break;
 
@@ -269,19 +321,33 @@ export function ExplorePageClient() {
 
             case 'view_created':
               if (data.viewSpec) {
-                setCurrentView(data.viewSpec);
-                // Track HTML views in history for filmstrip
-                if (data.viewSpec.html) {
-                  setViewHistory((prev) => [...prev, data.viewSpec as HtmlView]);
-                  setActiveViewIndex(-1); // -1 = latest (will be set to length after render)
-                  setViewData(null);
-                } else if (data.queryResult?.rows) {
-                  setViewData(data.queryResult.rows);
-                } else if (lastQueryRows) {
-                  setViewData(lastQueryRows);
-                } else {
-                  // Legacy ViewSpec path: execute the query to get data
-                  const query = data.viewSpec.query;
+                // Attach the view onto this turn's assistant message so
+                // <Turn> renders it inline. `viewData` is only populated for
+                // legacy ViewSpec paths; HtmlView embeds its own data.
+                const viewSpec = data.viewSpec as ViewSpec | HtmlView;
+                const isHtml = 'html' in viewSpec;
+                const viewData = isHtml
+                  ? null
+                  : data.queryResult?.rows ?? lastQueryRows ?? null;
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantMsgId
+                      ? { ...m, view: viewSpec, viewData }
+                      : m,
+                  ),
+                );
+
+                if (isHtml) {
+                  // Top-level view history is still maintained so PR 6 can
+                  // swap the current bottom-strip filmstrip for the new
+                  // right slide-out without having to rethread this state.
+                  setViewHistory((prev) => [...prev, viewSpec as HtmlView]);
+                  setActiveViewIndex(-1);
+                } else if (!viewData) {
+                  // Legacy ViewSpec path with no rows yet — kick off the
+                  // query and splice the result onto the message when it
+                  // comes back.
+                  const query = (viewSpec as ViewSpec).query;
                   const sourceId = query?.source;
                   if (sourceId) {
                     fetch(`/api/data-sources/${sourceId}/query`, {
@@ -292,11 +358,18 @@ export function ExplorePageClient() {
                       .then((r) => (r.ok ? r.json() : null))
                       .then((result) => {
                         if (result?.rows) {
-                          setViewData(result.rows);
+                          setMessages((prev) =>
+                            prev.map((m) =>
+                              m.id === assistantMsgId
+                                ? { ...m, viewData: result.rows }
+                                : m,
+                            ),
+                          );
                         }
                       })
                       .catch(() => {
-                        // Query execution failed — view will show loading state
+                        // Query execution failed — the view block will keep
+                        // showing its loading state until the stream closes.
                       });
                   }
                 }
@@ -304,7 +377,6 @@ export function ExplorePageClient() {
               break;
 
             case 'schema_proposed':
-              // Agent proposed a schema doc — open it in the editor for user review
               if (data.document) {
                 setSchemaCuration({ phase: 'editing', markdown: data.document });
               }
@@ -355,7 +427,6 @@ export function ExplorePageClient() {
 
   const handleSend = useCallback(
     async (message: string) => {
-      // Abort any in-progress stream
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
@@ -370,7 +441,6 @@ export function ExplorePageClient() {
 
       const assistantMsgId = `msg_${Date.now()}_reply`;
 
-      // Create optimistic empty assistant message
       setMessages((prev) => [
         ...prev,
         {
@@ -391,7 +461,7 @@ export function ExplorePageClient() {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Accept': 'text/event-stream',
+            Accept: 'text/event-stream',
           },
           body: JSON.stringify({
             message,
@@ -403,16 +473,17 @@ export function ExplorePageClient() {
 
         if (!response.ok) {
           const errData = await response.json().catch(() => ({}));
-          throw new Error(errData.error ?? `Agent request failed: ${response.status}`);
+          throw new Error(
+            errData.error ?? `Agent request failed: ${response.status}`,
+          );
         }
 
         const contentType = response.headers.get('Content-Type') ?? '';
 
         if (contentType.includes('text/event-stream')) {
-          // SSE streaming mode
           await consumeSSEStream(response, assistantMsgId);
         } else {
-          // Fallback to JSON mode
+          // Fallback JSON mode — some providers don't stream.
           const result = await response.json();
 
           setMessages((prev) =>
@@ -438,15 +509,26 @@ export function ExplorePageClient() {
           }
 
           if (result.viewSpec) {
-            setCurrentView(result.viewSpec);
-            // HTML views have data embedded — no need to fetch
-            if (result.viewSpec.html) {
-              setViewData(null);
-            } else if (result.queryResult?.rows) {
-              setViewData(result.queryResult.rows);
-            } else {
-              // Legacy ViewSpec path: execute the query to get data
-              const query = result.viewSpec.query;
+            const viewSpec = result.viewSpec as ViewSpec | HtmlView;
+            const isHtml = 'html' in viewSpec;
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsgId
+                  ? {
+                      ...m,
+                      view: viewSpec,
+                      viewData: isHtml
+                        ? null
+                        : (result.queryResult?.rows ?? null),
+                    }
+                  : m,
+              ),
+            );
+            if (isHtml) {
+              setViewHistory((prev) => [...prev, viewSpec as HtmlView]);
+              setActiveViewIndex(-1);
+            } else if (!result.queryResult?.rows) {
+              const query = (viewSpec as ViewSpec).query;
               const srcId = query?.source;
               if (srcId) {
                 fetch(`/api/data-sources/${srcId}/query`, {
@@ -455,7 +537,17 @@ export function ExplorePageClient() {
                   body: JSON.stringify({ queryIR: query }),
                 })
                   .then((r) => (r.ok ? r.json() : null))
-                  .then((qr) => { if (qr?.rows) setViewData(qr.rows); })
+                  .then((qr) => {
+                    if (qr?.rows) {
+                      setMessages((prev) =>
+                        prev.map((m) =>
+                          m.id === assistantMsgId
+                            ? { ...m, viewData: qr.rows }
+                            : m,
+                        ),
+                      );
+                    }
+                  })
                   .catch(() => {});
               }
             }
@@ -463,7 +555,6 @@ export function ExplorePageClient() {
         }
       } catch (err) {
         if (err instanceof Error && err.name === 'AbortError') {
-          // Stream was cancelled — mark message as done
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantMsgId ? { ...m, isStreaming: false } : m,
@@ -506,113 +597,98 @@ export function ExplorePageClient() {
   const handleGenerateSchema = useCallback(() => {
     if (!selectedSource) return;
     schemaGenerationTriggered.current = true;
-    setSchemaCuration(null); // Hide callout while chat runs
+    setSchemaCuration(null);
     const source = dataSources.find((s) => s.id === selectedSource);
     const sourceName = source?.name ?? 'this database';
     handleSend(
       `I need you to explore the "${sourceName}" database (source_id: ${selectedSource}) and create schema documentation.\n\n` +
-      `Follow these steps IN ORDER:\n\n` +
-      `**Phase 1 — Explore:** Use get_schema, describe_table, and run_sql to understand the tables, columns, relationships, and data patterns. ` +
-      `Pay special attention to: foreign key columns (which ID columns link to which tables), ` +
-      `enum/categorical values, date ranges, and row counts.\n\n` +
-      `**Phase 2 — Ask Questions:** Before writing any documentation, you MUST ask me at least 3 questions about:\n` +
-      `- Which tables are most important for the use cases I care about\n` +
-      `- Any domain-specific terminology or gotchas I should know about\n` +
-      `- How specific filtering should work (e.g. how to identify certain subsets of data)\n` +
-      `Wait for my answers before proceeding.\n\n` +
-      `**Phase 3 — Propose:** After I answer your questions, call propose_schema_doc with source_id="${selectedSource}" ` +
-      `and the complete documentation as markdown. I will review and edit it before saving.\n\n` +
-      `The documentation should cover: table descriptions, key columns, join patterns, data gotchas, and example queries. Keep it under 6000 characters.`,
+        `Follow these steps IN ORDER:\n\n` +
+        `**Phase 1 — Explore:** Use get_schema, describe_table, and run_sql to understand the tables, columns, relationships, and data patterns. ` +
+        `Pay special attention to: foreign key columns (which ID columns link to which tables), ` +
+        `enum/categorical values, date ranges, and row counts.\n\n` +
+        `**Phase 2 — Ask Questions:** Before writing any documentation, you MUST ask me at least 3 questions about:\n` +
+        `- Which tables are most important for the use cases I care about\n` +
+        `- Any domain-specific terminology or gotchas I should know about\n` +
+        `- How specific filtering should work (e.g. how to identify certain subsets of data)\n` +
+        `Wait for my answers before proceeding.\n\n` +
+        `**Phase 3 — Propose:** After I answer your questions, call propose_schema_doc with source_id="${selectedSource}" ` +
+        `and the complete documentation as markdown. I will review and edit it before saving.\n\n` +
+        `The documentation should cover: table descriptions, key columns, join patterns, data gotchas, and example queries. Keep it under 6000 characters.`,
     );
   }, [selectedSource, dataSources, handleSend]);
 
   const handleNewConversation = useCallback(() => {
     handleStop();
     setMessages([]);
-    setCurrentView(null);
-    setViewData(null);
     setViewHistory([]);
     setActiveViewIndex(-1);
     setConversationId(null);
   }, [handleStop]);
 
+  /**
+   * Install the Explore sidebar into the shell on mount; clear it on
+   * unmount so non-Explore routes don't inherit stale widgets. The
+   * `dataSources` / `selectedSource` / `handleNewConversation` values are
+   * captured via the closure — reinstall whenever they change so the
+   * sidebar UI reflects the current state.
+   */
+  useEffect(() => {
+    setSidebarSlot(
+      <ExploreSidebar
+        sources={dataSources}
+        selectedId={selectedSource}
+        onSelectSource={setSelectedSource}
+        onNewChat={handleNewConversation}
+      />,
+    );
+    return () => {
+      setSidebarSlot(null);
+    };
+  }, [dataSources, selectedSource, handleNewConversation, setSidebarSlot]);
+
+  // Active source metadata for the composer dek. Tables/rows are not yet
+  // exposed on the data-source API; pass just the name for now.
+  const activeSource = dataSources.find((s) => s.id === selectedSource) ?? null;
+
   return (
     <ChartThemeProvider mode="dark">
       <div className="flex h-full flex-col">
-        {/* Data source selector */}
-        <DataSourceSelector
-          sources={dataSources}
-          selectedId={selectedSource}
-          onChange={setSelectedSource}
+        <Thread
+          messages={messages}
+          selectedSource={selectedSource}
+          dataSources={dataSources}
+          schemaCuration={schemaCuration}
+          onGenerateSchema={handleGenerateSchema}
+          onSaveSchema={handleSaveSchema}
+          onCancelSchema={() =>
+            setSchemaCuration({ phase: 'callout', markdown: '' })
+          }
+          onSchemaMarkdownChange={(md) =>
+            setSchemaCuration((prev) => (prev ? { ...prev, markdown: md } : null))
+          }
         />
 
-        {/* Split panel */}
-        <div className="flex flex-1 overflow-hidden">
-          {/* Left: Chat */}
-          <div
-            className="flex w-[400px] shrink-0 flex-col"
-            style={{ borderRightWidth: '1px', borderStyle: 'solid', borderColor: 'var(--color-border)' }}
-          >
-            <ChatPanel
-              messages={messages}
-              onSend={handleSend}
-              onStop={handleStop}
-              onNewConversation={handleNewConversation}
-              isStreaming={isStreaming}
-            />
-          </div>
+        <Composer
+          onSend={handleSend}
+          onStop={handleStop}
+          isStreaming={isStreaming}
+          selectedSourceMeta={activeSource ? { name: activeSource.name } : null}
+        />
 
-          {/* Right: View or Schema Curation */}
-          <div className="flex flex-1 flex-col overflow-hidden">
-            <div className="flex-1 overflow-auto">
-            {currentView && isHtmlView(currentView) ? (
-              <HtmlViewRenderer
-                view={currentView}
-                isLoading={isStreaming}
-              />
-            ) : currentView ? (
-              <ViewRenderer
-                spec={currentView as ViewSpec}
-                data={viewData}
-                isLoading={isStreaming}
-                error={null}
-                width={800}
-                height={600}
-              />
-            ) : schemaCuration ? (
-              <SchemaCurationPanel
-                sourceId={selectedSource ?? ''}
-                sourceName={dataSources.find((s) => s.id === selectedSource)?.name ?? ''}
-                phase={schemaCuration.phase}
-                markdown={schemaCuration.markdown}
-                onGenerate={handleGenerateSchema}
-                onSave={handleSaveSchema}
-                onCancel={() => setSchemaCuration({ phase: 'callout', markdown: '' })}
-                onMarkdownChange={(md) => setSchemaCuration((prev) => prev ? { ...prev, markdown: md } : null)}
-              />
-            ) : (
-              <div className="flex h-full items-center justify-center">
-                <div className="text-center">
-                  <p className="text-lg font-medium" style={{ color: 'var(--color-foreground)' }}>
-                    {t('title')}
-                  </p>
-                  <p className="mt-1 text-sm" style={{ color: 'var(--color-muted-foreground)' }}>
-                    {t('placeholder')}
-                  </p>
-                </div>
-              </div>
-            )}
-            </div>
-            {/* View filmstrip */}
-            <ViewFilmstrip
-              views={viewHistory}
-              activeIndex={activeViewIndex === -1 ? viewHistory.length - 1 : activeViewIndex}
-              onSelect={(i) => {
-                setActiveViewIndex(i);
-                if (viewHistory[i]) setCurrentView(viewHistory[i]);
-              }}
-            />
-          </div>
+        {/* Legacy bottom-strip filmstrip kept mounted (hidden) so PR 6 can
+           swap it for the right slide-out without risking a PR 4 revert
+           leaving a dangling import. The component still receives fresh
+           `viewHistory` so PR 6 is a pure UI substitution. */}
+        <div hidden data-legacy-filmstrip>
+          <ViewFilmstrip
+            views={viewHistory}
+            activeIndex={
+              activeViewIndex === -1 ? viewHistory.length - 1 : activeViewIndex
+            }
+            onSelect={(i) => {
+              setActiveViewIndex(i);
+            }}
+          />
         </div>
       </div>
     </ChartThemeProvider>
