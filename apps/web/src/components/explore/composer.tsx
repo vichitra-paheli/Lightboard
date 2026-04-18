@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 
+import { LightboardLoader } from '../brand';
+
 /**
  * Local-storage key for the composer's persisted height. Matches the design
  * handoff so manual drag-resizes survive reload.
@@ -30,6 +32,18 @@ interface ComposerProps {
   onStop: () => void;
   disabled?: boolean;
   isStreaming?: boolean;
+  /**
+   * Transient "send is in flight" flag — true from the moment the user
+   * clicks Send until the first SSE event lands and the stream starts.
+   * Makes the send button show a loader during the open-connection gap.
+   */
+  isSending?: boolean;
+  /**
+   * Transient "abort is in flight" flag — true from the moment the user
+   * clicks Stop until the fetch promise settles. Makes the stop button
+   * show a loader during the abort round-trip.
+   */
+  isAborting?: boolean;
   /**
    * Active source metadata; if set, renders a left-side mono dek like
    * `cricket · 24 tables · 42.1M rows`. Passing just a `name` renders the
@@ -71,6 +85,8 @@ export function Composer({
   onStop,
   disabled,
   isStreaming,
+  isSending,
+  isAborting,
   selectedSourceMeta,
 }: ComposerProps) {
   const t = useTranslations('explore');
@@ -109,7 +125,8 @@ export function Composer({
     }
   }, [height, hydrated]);
 
-  const canSend = value.trim().length > 0 && !disabled && !isStreaming;
+  const canSend =
+    value.trim().length > 0 && !disabled && !isStreaming && !isSending;
 
   const doSend = useCallback(() => {
     if (!canSend) return;
@@ -270,9 +287,18 @@ export function Composer({
             </div>
 
             {isStreaming ? (
-              <StopButton onClick={onStop} label={t('stop')} />
+              <StopButton
+                onClick={onStop}
+                label={t('stop')}
+                loading={isAborting}
+              />
             ) : (
-              <SendButton onClick={doSend} enabled={canSend} label={t('send')} />
+              <SendButton
+                onClick={doSend}
+                enabled={canSend}
+                label={t('send')}
+                loading={isSending}
+              />
             )}
           </div>
         </div>
@@ -363,51 +389,60 @@ function SendButton({
   onClick,
   enabled,
   label,
+  loading,
 }: {
   onClick: () => void;
   enabled: boolean;
   label: string;
+  loading?: boolean;
 }) {
   const [hover, setHover] = useState(false);
+  const showArrow = !loading;
+  const interactive = enabled && !loading;
   return (
     <button
       type="button"
       data-composer-send
       onClick={onClick}
-      disabled={!enabled}
+      disabled={!interactive}
       aria-label={label}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       className="inline-flex items-center gap-1.5 rounded-full px-3.5 py-2 text-[12px] font-medium"
       style={{
-        background: enabled ? 'var(--ink-1)' : 'var(--bg-7)',
-        color: enabled ? 'var(--bg-0)' : 'var(--ink-5)',
-        cursor: enabled ? 'pointer' : 'not-allowed',
+        background: interactive ? 'var(--ink-1)' : 'var(--bg-7)',
+        color: interactive ? 'var(--bg-0)' : 'var(--ink-5)',
+        cursor: interactive ? 'pointer' : 'not-allowed',
         transition: 'all 180ms var(--ease-out-quint)',
-        transform: hover && enabled ? 'translateY(-1px)' : 'translateY(0)',
-        boxShadow: hover && enabled ? 'var(--shadow-pop)' : 'none',
+        transform: hover && interactive ? 'translateY(-1px)' : 'translateY(0)',
+        boxShadow: hover && interactive ? 'var(--shadow-pop)' : 'none',
       }}
     >
       <span>{label}</span>
-      <svg
-        width="10"
-        height="10"
-        viewBox="0 0 10 10"
-        aria-hidden="true"
-        style={{
-          transition: 'transform 180ms var(--ease-out-quint)',
-          transform: hover && enabled ? 'translateX(2px)' : 'translateX(0)',
-        }}
-      >
-        <path
-          d="M1 5h7M5 1l4 4-4 4"
-          stroke="currentColor"
-          strokeWidth="1.4"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          fill="none"
-        />
-      </svg>
+      {showArrow ? (
+        <svg
+          width="10"
+          height="10"
+          viewBox="0 0 10 10"
+          aria-hidden="true"
+          style={{
+            transition: 'transform 180ms var(--ease-out-quint)',
+            transform:
+              hover && interactive ? 'translateX(2px)' : 'translateX(0)',
+          }}
+        >
+          <path
+            d="M1 5h7M5 1l4 4-4 4"
+            stroke="currentColor"
+            strokeWidth="1.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            fill="none"
+          />
+        </svg>
+      ) : (
+        <LightboardLoader size={12} ariaLabel="" />
+      )}
     </button>
   );
 }
@@ -416,22 +451,37 @@ function SendButton({
  * Rounded-pill stop button shown while a stream is in flight. Uses the
  * destructive surface so users can't confuse it with the send affordance.
  */
-function StopButton({ onClick, label }: { onClick: () => void; label: string }) {
+function StopButton({
+  onClick,
+  label,
+  loading,
+}: {
+  onClick: () => void;
+  label: string;
+  loading?: boolean;
+}) {
   return (
     <button
       type="button"
       data-composer-stop
       onClick={onClick}
+      disabled={loading}
       aria-label={label}
       className="inline-flex items-center gap-1.5 rounded-full px-3.5 py-2 text-[12px] font-medium transition-colors"
       style={{
         background: 'var(--color-destructive)',
         color: 'var(--color-destructive-foreground)',
+        cursor: loading ? 'wait' : 'pointer',
+        opacity: loading ? 0.85 : 1,
       }}
     >
-      <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
-        <rect x="2" y="2" width="6" height="6" rx="1" fill="currentColor" />
-      </svg>
+      {loading ? (
+        <LightboardLoader size={12} ariaLabel="" />
+      ) : (
+        <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+          <rect x="2" y="2" width="6" height="6" rx="1" fill="currentColor" />
+        </svg>
+      )}
       <span>{label}</span>
     </button>
   );

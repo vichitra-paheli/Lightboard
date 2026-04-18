@@ -4,6 +4,8 @@ import { Button, Card, CardContent, CardFooter, CardHeader, CardTitle, Input, La
 import { useTranslations } from 'next-intl';
 import { useState } from 'react';
 
+import { LightboardLoader } from '../brand';
+
 /** Connector type options. */
 const CONNECTOR_TYPES = [
   { value: 'postgres', label: 'PostgreSQL' },
@@ -141,12 +143,16 @@ export function AddDataSourceForm({ onSave, onCancel, onTestConnection }: AddDat
           <button
             onClick={handleTest}
             disabled={testing || !host || !database}
-            className="rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground disabled:opacity-50"
           >
-            {testing ? '...' : t('testConnection')}
+            {testing && <LightboardLoader size={12} ariaLabel="" />}
+            <span>{testing ? t('testing') : t('testConnection')}</span>
           </button>
           <Button onClick={handleSave} disabled={saving || !name || !host || !database}>
-            {saving ? '...' : t('save')}
+            <span className="inline-flex items-center gap-2">
+              {saving && <LightboardLoader size={12} ariaLabel="" />}
+              <span>{saving ? t('saving') : t('save')}</span>
+            </span>
           </Button>
         </div>
       </CardFooter>

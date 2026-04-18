@@ -1,5 +1,6 @@
 'use client';
 
+import { LightboardLoader } from '../../brand';
 import type { MessagePart } from '../chat-message';
 
 /**
@@ -103,8 +104,8 @@ interface ToolCallRowProps {
  * cluster's dashed timeline).
  *
  * Status semantics:
- * - `running` — full-color dot with a pulsing box-shadow ring.
- * - `done`    — stable colored dot, duration visible.
+ * - `running` — 14px rainbow-beam LightboardLoader at the dot position.
+ * - `done`    — stable colored hollow dot, duration visible.
  * - `error`   — destructive red dot, duration if available.
  * - `aborted` — ink-5 dot, struck-through tool name.
  *
@@ -148,25 +149,37 @@ export function ToolCallRow({ part }: ToolCallRowProps) {
         paddingLeft: isNested ? 14 : 14,
       }}
     >
-      {/* Kind-colored dot aligned with the cluster's dashed rule (left: -2) */}
-      <div
-        aria-hidden="true"
-        style={{
-          position: 'absolute',
-          left: isNested ? 10 : -2,
-          top: 12,
-          width: 8,
-          height: 8,
-          borderRadius: 99,
-          background: dotBackground,
-          border: `1.5px solid ${dotBorderColor}`,
-          ...(isRunning
-            ? {
-                animation: 'pulse 1.4s ease-in-out infinite',
-              }
-            : {}),
-        }}
-      />
+      {/* Status glyph — 14px rainbow loader while running, hollow kind-colored
+          dot when terminal. Absolute-positioned so the size swap doesn't shift
+          sibling content. Visual centers align: 8x8 dot centered at x=2 (top) /
+          x=14 (nested), y=16; 14x14 loader uses left = center - 7, top = 9. */}
+      {isRunning ? (
+        <div
+          style={{
+            position: 'absolute',
+            left: isNested ? 7 : -5,
+            top: 9,
+            width: 14,
+            height: 14,
+          }}
+        >
+          <LightboardLoader size={14} ariaLabel="" />
+        </div>
+      ) : (
+        <div
+          aria-hidden="true"
+          style={{
+            position: 'absolute',
+            left: isNested ? 10 : -2,
+            top: 12,
+            width: 8,
+            height: 8,
+            borderRadius: 99,
+            background: dotBackground,
+            border: `1.5px solid ${dotBorderColor}`,
+          }}
+        />
+      )}
       {/* Kind label */}
       <div
         style={{

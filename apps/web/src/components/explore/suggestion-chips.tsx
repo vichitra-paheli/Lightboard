@@ -2,6 +2,8 @@
 
 import { useTranslations } from 'next-intl';
 
+import { LightboardLoader } from '../brand';
+
 /**
  * Props for {@link SuggestionChips}.
  */
@@ -10,6 +12,12 @@ interface SuggestionChipsProps {
   items: string[];
   /** Called with the clicked chip's label text. */
   onSelect: (text: string) => void;
+  /**
+   * Label text of the chip currently waiting on a send to land. The matching
+   * chip disables and renders a 12px loader in place of its text until the
+   * stream opens.
+   */
+  activeLabel?: string | null;
 }
 
 /**
@@ -31,10 +39,16 @@ interface SuggestionChipsProps {
  * Empty-items guard: renders `null` so an assistant turn with no suggestions
  * doesn't leave a blank 20px gap below the last block.
  */
-export function SuggestionChips({ items, onSelect }: SuggestionChipsProps) {
+export function SuggestionChips({
+  items,
+  onSelect,
+  activeLabel,
+}: SuggestionChipsProps) {
   const t = useTranslations('explore');
 
   if (items.length === 0) return null;
+
+  const hasActive = typeof activeLabel === 'string' && activeLabel.length > 0;
 
   return (
     <div
@@ -50,7 +64,13 @@ export function SuggestionChips({ items, onSelect }: SuggestionChipsProps) {
         {t('suggestionsLabel')}
       </span>
       {items.map((text) => (
-        <SuggestionChip key={text} label={text} onSelect={onSelect} />
+        <SuggestionChip
+          key={text}
+          label={text}
+          onSelect={onSelect}
+          loading={activeLabel === text}
+          disabled={hasActive}
+        />
       ))}
     </div>
   );
@@ -66,30 +86,44 @@ export function SuggestionChips({ items, onSelect }: SuggestionChipsProps) {
 function SuggestionChip({
   label,
   onSelect,
+  loading,
+  disabled,
 }: {
   label: string;
   onSelect: (text: string) => void;
+  loading?: boolean;
+  disabled?: boolean;
 }) {
+  const isDisabled = !!disabled;
   return (
     <button
       type="button"
       data-suggestion-chip
-      onClick={() => onSelect(label)}
-      className="rounded-full px-3 py-[7px] text-[12px] transition-colors focus:outline-none focus-visible:ring-2"
+      onClick={() => {
+        if (isDisabled) return;
+        onSelect(label);
+      }}
+      disabled={isDisabled}
+      aria-busy={loading ? 'true' : undefined}
+      className="inline-flex items-center gap-2 rounded-full px-3 py-[7px] text-[12px] transition-colors focus:outline-none focus-visible:ring-2"
       style={{
         background: 'var(--bg-4)',
         border: '1px solid var(--line-3)',
         color: 'var(--ink-2)',
+        cursor: isDisabled ? 'not-allowed' : 'pointer',
+        opacity: isDisabled && !loading ? 0.6 : 1,
         // Focus ring color — overridden via inline outline on focus-visible
         // below so we don't ship a token-less Tailwind ring color.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CSS custom property on style object
         ['--tw-ring-color' as any]: 'var(--accent-border, #F2C265)',
       }}
       onMouseEnter={(e) => {
+        if (isDisabled) return;
         e.currentTarget.style.background = 'var(--bg-6)';
         e.currentTarget.style.color = 'var(--ink-1)';
       }}
       onMouseLeave={(e) => {
+        if (isDisabled) return;
         e.currentTarget.style.background = 'var(--bg-4)';
         e.currentTarget.style.color = 'var(--ink-2)';
       }}
@@ -111,7 +145,8 @@ function SuggestionChip({
         e.currentTarget.style.color = 'var(--ink-2)';
       }}
     >
-      {label}
+      {loading && <LightboardLoader size={12} ariaLabel="" />}
+      <span>{label}</span>
     </button>
   );
 }

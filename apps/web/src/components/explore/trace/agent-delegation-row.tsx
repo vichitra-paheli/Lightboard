@@ -1,5 +1,6 @@
 'use client';
 
+import { LightboardLoader } from '../../brand';
 import type { MessagePart } from '../chat-message';
 
 /**
@@ -15,9 +16,10 @@ interface AgentDelegationRowProps {
  * delegation sits next to tool rows in a cluster.
  *
  * Kind color is always `--kind-narrate` — a delegation is a narrative
- * handoff, not a concrete I/O step. Running → pulsing dot; done → flat
- * color; aborted → ink-5 + strikethrough on the agent name. When the
- * delegation has a summary, it renders on a second row in dimmed ink-3.
+ * handoff, not a concrete I/O step. Running → 14px rainbow-beam loader;
+ * done → flat hollow dot; aborted → ink-5 + strikethrough on the agent
+ * name. When the delegation has a summary, it renders on a second row
+ * in dimmed ink-3.
  */
 export function AgentDelegationRow({ part }: AgentDelegationRowProps) {
   const isRunning = part.status === 'running';
@@ -36,22 +38,33 @@ export function AgentDelegationRow({ part }: AgentDelegationRowProps) {
           position: 'relative',
         }}
       >
-        <div
-          aria-hidden="true"
-          style={{
-            position: 'absolute',
-            left: -2,
-            top: 12,
-            width: 8,
-            height: 8,
-            borderRadius: 99,
-            background: 'var(--bg-0)',
-            border: `1.5px solid ${dotColor}`,
-            ...(isRunning
-              ? { animation: 'pulse 1.4s ease-in-out infinite' }
-              : {}),
-          }}
-        />
+        {isRunning ? (
+          <div
+            style={{
+              position: 'absolute',
+              left: -5,
+              top: 9,
+              width: 14,
+              height: 14,
+            }}
+          >
+            <LightboardLoader size={14} ariaLabel="" />
+          </div>
+        ) : (
+          <div
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              left: -2,
+              top: 12,
+              width: 8,
+              height: 8,
+              borderRadius: 99,
+              background: 'var(--bg-0)',
+              border: `1.5px solid ${dotColor}`,
+            }}
+          />
+        )}
         <div
           style={{
             fontFamily: 'var(--font-mono), JetBrains Mono, ui-monospace, monospace',
@@ -95,9 +108,18 @@ export function AgentDelegationRow({ part }: AgentDelegationRowProps) {
             fontSize: 10,
             color: 'var(--ink-5)',
             fontVariantNumeric: 'tabular-nums',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
           }}
         >
-          {isRunning ? 'running' : isAborted ? 'aborted' : 'done'}
+          {isRunning ? (
+            <LightboardLoader size={12} ariaLabel="" />
+          ) : isAborted ? (
+            'aborted'
+          ) : (
+            'done'
+          )}
         </div>
       </div>
       {part.summary && !isRunning && (
