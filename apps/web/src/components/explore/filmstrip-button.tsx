@@ -21,10 +21,10 @@ interface FilmstripButtonProps {
  *
  * Layout matches the editorial handoff: `[icon] Filmstrip [6]` — a grid
  * glyph on the left, a mid-weight label, and a small mono count badge on
- * the right. The button is rendered as a sibling of the ConversationHeader
- * by {@link Thread}, anchored to the top-right of the 920px centered
- * content column via `position: absolute` so it sits level with the
- * eyebrow row without consuming flow space.
+ * the right. Positioning is owned by the page chrome (ExplorePageClient
+ * fixes it to the viewport's top-right, just below the 56px top bar) so
+ * the filmstrip panel — which slides in at `position: fixed; top: 0;
+ * right: 0` — naturally covers the button via its higher z-index.
  *
  * When open (panel expanded), the button adopts `--accent-bg` +
  * `--accent-border` so it visually binds to the active card styling inside

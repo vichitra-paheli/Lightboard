@@ -1,6 +1,6 @@
 'use client';
 
-import { type ReactNode, useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { useTranslations } from 'next-intl';
 import type { ChatMessageData } from './chat-message';
 import { ConversationHeader } from './conversation-header';
@@ -70,14 +70,6 @@ interface ThreadProps {
   onSaveSchema?: (markdown: string) => void;
   onCancelSchema?: () => void;
   onSchemaMarkdownChange?: (markdown: string) => void;
-  /**
-   * Optional top-right slot — typically the {@link FilmstripButton}. Rendered
-   * inside the 920px centered column, absolutely positioned so it sits level
-   * with the conversation eyebrow without consuming flow space. Page chrome
-   * (e.g. ExplorePageClient) owns the filmstrip state and passes the button
-   * in; Thread owns positioning so the button tracks the content column.
-   */
-  topRightSlot?: ReactNode;
 }
 
 /**
@@ -106,7 +98,6 @@ export function Thread({
   onSaveSchema,
   onCancelSchema,
   onSchemaMarkdownChange,
-  topRightSlot,
 }: ThreadProps) {
   const t = useTranslations('explore');
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -134,15 +125,6 @@ export function Thread({
         className="relative mx-auto"
         style={{ maxWidth: 920, padding: '28px 48px 40px' }}
       >
-        {topRightSlot && (
-          <div
-            className="absolute"
-            style={{ top: 20, right: 48, zIndex: 2 }}
-          >
-            {topRightSlot}
-          </div>
-        )}
-
         {hasMessages && (
           <ConversationHeader
             firstUserMessage={firstUser}

@@ -717,14 +717,27 @@ export function ExplorePageClient() {
           onSchemaMarkdownChange={(md) =>
             setSchemaCuration((prev) => (prev ? { ...prev, markdown: md } : null))
           }
-          topRightSlot={
+        />
+
+        {/*
+         * Fixed-position button at the top-right of the viewport, just below
+         * the 56px top bar. Lives OUTSIDE the thread so it tracks the viewport
+         * rather than the 920px content column. Its z-index (3) sits below the
+         * filmstrip panel (z-index 5) so the panel naturally covers it when
+         * open — the button appears "tucked under" the expanding panel.
+         */}
+        <div
+          className="pointer-events-none fixed"
+          style={{ top: 68, right: 20, zIndex: 3 }}
+        >
+          <div className="pointer-events-auto">
             <FilmstripButton
               open={filmstripOpen}
               onToggle={() => setFilmstripOpen((v) => !v)}
               count={viewHistory.length}
             />
-          }
-        />
+          </div>
+        </div>
 
         <Composer
           onSend={handleSend}
