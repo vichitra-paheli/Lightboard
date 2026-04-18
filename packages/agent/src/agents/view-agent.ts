@@ -98,6 +98,15 @@ export class ViewAgent implements SubAgent {
       const toolResults = [];
 
       for (const tc of toolCalls) {
+        if (tc.name === 'create_view' || tc.name === 'modify_view') {
+          const title = (tc.input as Record<string, unknown>).title;
+          this.config.onStatus?.(
+            tc.name === 'create_view'
+              ? `Rendering visualization${title ? `: ${String(title)}` : '…'}`
+              : 'Updating visualization…',
+          );
+        }
+
         const result = await this.config.toolRouter.execute(tc.name, tc.input);
         toolResults.push({
           toolCallId: tc.id,
@@ -109,6 +118,11 @@ export class ViewAgent implements SubAgent {
         if (!result.isError && (tc.name === 'create_view' || tc.name === 'modify_view')) {
           try {
             viewResult = JSON.parse(result.content) as Record<string, unknown>;
+            const html = (viewResult.viewSpec as Record<string, unknown> | undefined)?.html as string | undefined;
+            if (html) {
+              const kb = Math.round((html.length / 1024) * 10) / 10;
+              this.config.onStatus?.(`Visualization ready (${kb} KB)`);
+            }
           } catch {
             // ignore parse failures
           }

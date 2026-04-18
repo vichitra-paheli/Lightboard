@@ -55,8 +55,13 @@ if (typeof leaderCleanupInterval === 'object' && 'unref' in leaderCleanupInterva
   (leaderCleanupInterval as NodeJS.Timeout).unref();
 }
 
-/** Maximum duration for agent processing in milliseconds. */
-const AGENT_TIMEOUT_MS = 600_000;
+/**
+ * Safety ceiling for the non-streaming path. The SSE path has no ceiling —
+ * it relies on the heartbeat + client disconnect to detect dead work.
+ * Introspection of large, under-documented databases can legitimately take
+ * a long time, so this number is intentionally generous.
+ */
+const AGENT_TIMEOUT_MS = 1_800_000; // 30 minutes
 
 /** Redis TTL for conversation sessions in seconds. */
 const CONVERSATION_TTL_SEC = 3600;
@@ -179,6 +184,12 @@ export const POST = withAuth(async (req, { db, orgId }) => {
       // The frontend will show it in the editor; the user saves via PUT /api/data-sources/[id]/schema.
       console.log(`[Chat] Schema doc proposed: ${document.length} chars (awaiting user review)`);
     },
+    getSchemaContext: async (srcId: string) => {
+      // Feeds check_query_hints. Returns the enriched context from bootstrap
+      // (tables → sampleValues, date ranges) for the requested source.
+      const ds = agentDataSources.find((d) => d.id === srcId);
+      return (ds?.schemaContext as Record<string, unknown> | undefined) ?? null;
+    },
   };
 
   // Generate or reuse conversation/session ID
@@ -260,6 +271,20 @@ async function handleNonStreaming(
             try {
               const parsed = JSON.parse(event.result);
               if (parsed.viewSpec) viewSpec = parsed.viewSpec;
+            } catch { /* ignore parse errors */ }
+          }
+
+          // Extract ViewSpec from await_tasks results (dispatched view agents)
+          if (event.name === 'await_tasks' && !event.isError) {
+            try {
+              const parsed = JSON.parse(event.result);
+              for (const taskResult of Object.values(parsed) as Array<Record<string, unknown>>) {
+                if (taskResult && taskResult.role === 'view' && taskResult.success && taskResult.data) {
+                  const viewData = taskResult.data as Record<string, unknown>;
+                  const candidate = (viewData.viewSpec as Record<string, unknown>) ?? viewData;
+                  if (candidate && (candidate.html || candidate.viewId)) viewSpec = candidate;
+                }
+              }
             } catch { /* ignore parse errors */ }
           }
 
@@ -408,8 +433,13 @@ function handleStreaming(
           enqueue('status', { text: '' }); // Clear status
         }
 
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new Error('Agent processing timed out')), AGENT_TIMEOUT_MS);
+        // When the client disconnects, cancel every in-flight sub-agent task
+        // so we don't leak DB connections or keep hitting Claude's API.
+        abort.signal.addEventListener('abort', () => {
+          const cancelled = leader.cancelAllTasks();
+          if (cancelled > 0) {
+            console.log(`[Chat] Client disconnected — cancelled ${cancelled} in-flight task(s)`);
+          }
         });
 
         const abortPromise = new Promise<never>((_, reject) => {
@@ -456,6 +486,19 @@ function handleStreaming(
                         enqueue('view_created', { viewSpec });
                       }
                     }
+                    // Emit view_created for view tasks surfaced via await_tasks.
+                    if (event.name === 'await_tasks') {
+                      for (const taskResult of Object.values(parsed) as Array<Record<string, unknown>>) {
+                        if (taskResult && taskResult.role === 'view' && taskResult.success && taskResult.data) {
+                          const viewData = taskResult.data as Record<string, unknown>;
+                          const viewSpec = (viewData.viewSpec as Record<string, unknown>) ?? viewData;
+                          if (viewSpec && (viewSpec.html || viewSpec.viewId)) {
+                            console.log(`[Chat] Emitting view_created (dispatch), html=${(viewSpec.html as string | undefined)?.length ?? 0} chars`);
+                            enqueue('view_created', { viewSpec });
+                          }
+                        }
+                      }
+                    }
                   } catch { /* ignore parse errors */ }
                 }
                 break;
@@ -469,6 +512,32 @@ function handleStreaming(
               case 'thinking':
                 enqueue('thinking', { text: event.text });
                 break;
+              case 'task_dispatched':
+                enqueue('task_dispatched', {
+                  taskId: event.taskId,
+                  agent: event.agent,
+                  instruction: event.instruction,
+                });
+                break;
+              case 'task_complete':
+                enqueue('task_complete', {
+                  taskId: event.taskId,
+                  agent: event.agent,
+                  summary: event.summary,
+                  isError: event.isError,
+                });
+                break;
+              case 'task_cancelled':
+                enqueue('task_cancelled', { taskId: event.taskId });
+                break;
+              case 'task_progress':
+                enqueue('task_progress', { taskId: event.taskId, message: event.message });
+                break;
+              case 'status':
+                // Leader/sub-agent free-form status — distinct from the schema
+                // bootstrap `status` wire event (which uses { text } payload).
+                enqueue('agent_status', { scope: event.scope, message: event.message });
+                break;
               case 'done': {
                 const history = leader.getHistory();
                 await saveConversation(orgId, sessionId, history);
@@ -479,7 +548,10 @@ function handleStreaming(
           }
         };
 
-        await Promise.race([processStream(), timeoutPromise, abortPromise]);
+        // No wall-clock timeout on the SSE path — the heartbeat + client
+        // disconnect listener are the liveness check. Introspection on a
+        // big, under-documented database can legitimately take minutes.
+        await Promise.race([processStream(), abortPromise]);
       } catch (err) {
         if (!abort.signal.aborted) {
           const errorMessage = err instanceof LLMError

@@ -12,6 +12,16 @@ export type AgentEvent =
   | { type: 'agent_start'; agent: string; task: string }
   | { type: 'agent_end'; agent: string; summary: string }
   | { type: 'thinking'; text: string }
+  /** A sub-agent task has been dispatched to run in the background. */
+  | { type: 'task_dispatched'; taskId: string; agent: string; instruction: string }
+  /** A background task has finished (success or failure). */
+  | { type: 'task_complete'; taskId: string; agent: string; summary: string; isError: boolean }
+  /** A background task was cooperatively cancelled. */
+  | { type: 'task_cancelled'; taskId: string }
+  /** Progress ping from a running task — human-friendly status string for the UI. */
+  | { type: 'task_progress'; taskId: string; message: string }
+  /** Status ping from the leader or a sub-agent not tied to a specific task. */
+  | { type: 'status'; scope: string; message: string }
   | { type: 'done'; stopReason: string };
 
 /** Data sources available to the agent. */

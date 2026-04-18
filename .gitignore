@@ -50,3 +50,6 @@ plugins/*.tar.gz
 *.duckdb
 *.duckdb.wal
 Modelfile
+
+# Large sample datasets — keep local only
+sample_data/

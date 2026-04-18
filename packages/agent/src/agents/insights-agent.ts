@@ -98,6 +98,11 @@ export class InsightsAgent implements SubAgent {
       // Execute tool calls
       const toolResults = [];
       for (const tc of toolCalls) {
+        if (tc.name === 'analyze_data') {
+          const desc = (tc.input as Record<string, unknown>).description;
+          this.config.onStatus?.(desc ? `Analyzing: ${String(desc)}` : 'Running statistical analysis…');
+        }
+
         const result = await this.config.toolRouter.execute(tc.name, tc.input);
         toolResults.push({
           toolCallId: tc.id,
@@ -109,6 +114,11 @@ export class InsightsAgent implements SubAgent {
         if (!result.isError && tc.name === 'analyze_data') {
           try {
             lastAnalysisResult = JSON.parse(result.content) as Record<string, unknown>;
+            const rowCount = (lastAnalysisResult.rowCount as number | undefined)
+              ?? (Array.isArray(lastAnalysisResult.rows) ? (lastAnalysisResult.rows as unknown[]).length : undefined);
+            if (typeof rowCount === 'number') {
+              this.config.onStatus?.(`Analysis finished on ${rowCount.toLocaleString()} row${rowCount === 1 ? '' : 's'}`);
+            }
           } catch {
             lastAnalysisResult = { rawResult: result.content };
           }

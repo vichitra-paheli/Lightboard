@@ -46,8 +46,13 @@ const DEFAULT_LIMIT = 1000;
 /** Maximum rows returned before truncation. */
 const MAX_ROWS = 10000;
 
-/** Statement timeout in seconds. */
-const STATEMENT_TIMEOUT_MS = 30000;
+/**
+ * Statement timeout for agent-originated queries. Intentionally short —
+ * the agent discovers "this is too expensive" faster when a failure costs
+ * 10s instead of 30s, and our prompt steers it to TABLESAMPLE / filters on
+ * large tables. User-initiated queries can still run longer via other paths.
+ */
+const STATEMENT_TIMEOUT_MS = 10000;
 
 const INTROSPECT_COLUMNS = `
   SELECT
@@ -370,7 +375,7 @@ function classifyConnectionError(err: unknown): DataSourceError {
 
   if (message.includes('statement timeout') || message.includes('canceling statement')) {
     return new DataSourceError(
-      'Query timed out after 30 seconds. Try a simpler query or add filters.',
+      `Query timed out after ${STATEMENT_TIMEOUT_MS / 1000} seconds. For large tables use TABLESAMPLE, add WHERE filters, or query a single table before joining.`,
       'timeout',
     );
   }
