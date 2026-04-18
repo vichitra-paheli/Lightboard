@@ -9,7 +9,7 @@ vi.mock('next-intl', () => ({
 
 describe('<Sidebar>', () => {
   beforeEach(() => {
-    useUiStore.setState({ sidebarOpen: true });
+    useUiStore.setState({ sidebarOpen: true, sidebarSlot: null });
   });
 
   // Project has no shared vitest setup file, so `@testing-library/react`'s
@@ -19,17 +19,14 @@ describe('<Sidebar>', () => {
     cleanup();
   });
 
-  it('renders children when open', () => {
-    const { getByText } = render(
-      <Sidebar>
-        <div>Per-route content</div>
-      </Sidebar>,
-    );
+  it('renders the current slot from the UI store when open', () => {
+    useUiStore.setState({ sidebarSlot: <div>Per-route content</div> });
+    const { getByText } = render(<Sidebar />);
     expect(getByText('Per-route content')).toBeTruthy();
   });
 
   it('expands to 240px when sidebarOpen is true', () => {
-    const { container } = render(<Sidebar>content</Sidebar>);
+    const { container } = render(<Sidebar />);
     const aside = container.querySelector('aside');
     expect(aside?.getAttribute('data-open')).toBe('true');
     // The inline style carries the current pixel width — jsdom normalizes to
@@ -39,7 +36,7 @@ describe('<Sidebar>', () => {
 
   it('collapses to 0px width when sidebarOpen is false', () => {
     useUiStore.setState({ sidebarOpen: false });
-    const { container } = render(<Sidebar>content</Sidebar>);
+    const { container } = render(<Sidebar />);
     const aside = container.querySelector('aside');
     expect(aside?.getAttribute('data-open')).toBe('false');
     expect(aside?.style.width).toBe('0px');
@@ -49,7 +46,15 @@ describe('<Sidebar>', () => {
   });
 
   it('renders a logout button in the footer', () => {
-    const { getByText } = render(<Sidebar>content</Sidebar>);
+    const { getByText } = render(<Sidebar />);
     expect(getByText('Log out')).toBeTruthy();
+  });
+
+  it('renders nothing in the slot area when sidebarSlot is null', () => {
+    const { container } = render(<Sidebar />);
+    // The slot wrapper is the first column inside the aside; its text content
+    // should be empty when no slot is installed.
+    const slotWrapper = container.querySelector('aside > div');
+    expect(slotWrapper?.textContent).toBe('');
   });
 });
