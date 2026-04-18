@@ -37,6 +37,7 @@ import { Composer } from './composer';
 import { FilmstripButton } from './filmstrip-button';
 import { FilmstripPanel, type FilmstripItem } from './filmstrip-panel';
 import { createReducer, parseSSEJson, type Reducer } from './sse-reducer';
+import { buildSuggestionsForView } from './suggestions-fixture';
 import type { DataSourceOption } from './types';
 import { ExploreSidebar } from './sidebar/explore-sidebar';
 import { Thread } from './thread';
@@ -102,6 +103,43 @@ export function ExplorePageClient() {
       }
     }
     return out;
+  }, [messages]);
+
+  /**
+   * TODO(backend-suggestions): Replace this with an SSE `suggestions` event
+   * so the agent can supply dimension/measure-aware follow-ups. For PR 7 we
+   * backfill the suggestions part from a hardcoded fixture keyed off the
+   * first view's chart kind so the UI surface ships without a backend
+   * dependency. See `suggestions-fixture.ts` for the deletion trigger.
+   *
+   * Trigger conditions:
+   *   1. The message is a completed assistant turn (not `isStreaming`).
+   *   2. It carries at least one `{ kind: 'view' }` part — chips are a
+   *      visual follow-up for chart turns, not for tool-only or pure-text
+   *      replies.
+   *   3. It does not already have a `{ kind: 'suggestions' }` part — keeps
+   *      the effect idempotent across re-renders and avoids appending
+   *      duplicates when other parts of `messages` change.
+   */
+  useEffect(() => {
+    setMessages((prev) => {
+      let changed = false;
+      const next = prev.map((m) => {
+        if (m.role !== 'assistant' || m.isStreaming) return m;
+        const viewPart = m.parts.find((p) => p.kind === 'view');
+        if (!viewPart || viewPart.kind !== 'view') return m;
+        const hasSuggestions = m.parts.some((p) => p.kind === 'suggestions');
+        if (hasSuggestions) return m;
+        const items = buildSuggestionsForView(viewPart.view);
+        if (items.length === 0) return m;
+        changed = true;
+        return {
+          ...m,
+          parts: [...m.parts, { kind: 'suggestions' as const, items }],
+        };
+      });
+      return changed ? next : prev;
+    });
   }, [messages]);
 
   /**
@@ -713,6 +751,7 @@ export function ExplorePageClient() {
           onSchemaMarkdownChange={(md) =>
             setSchemaCuration((prev) => (prev ? { ...prev, markdown: md } : null))
           }
+          onSuggestionClick={handleSend}
         />
 
         {/*

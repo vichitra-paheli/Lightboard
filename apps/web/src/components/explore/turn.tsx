@@ -69,7 +69,7 @@ export function Turn({
       )}
 
       {allSuggestions.length > 0 && onSuggestionClick && (
-        <SuggestionChips items={allSuggestions} onClick={onSuggestionClick} />
+        <SuggestionChips items={allSuggestions} onSelect={onSuggestionClick} />
       )}
     </div>
   );

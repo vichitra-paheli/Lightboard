@@ -67,7 +67,8 @@
     "filmstripEmpty": "No visualizations yet. Send a prompt to get started.",
     "filmstripClose": "Close filmstrip",
     "filmstripOpen": "Open filmstrip",
-    "filmstripPinned": "pinned"
+    "filmstripPinned": "pinned",
+    "suggestionsLabel": "Follow-up suggestions"
   },
   "dataSources": {
     "title": "Data Sources",
