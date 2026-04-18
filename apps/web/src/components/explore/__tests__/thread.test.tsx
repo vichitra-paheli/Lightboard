@@ -28,17 +28,25 @@ globalThis.fetch = vi.fn(async () =>
   new Response(JSON.stringify({ user: { name: 'Alex' } }), { status: 200 }),
 ) as unknown as typeof fetch;
 
-const USER_A: ChatMessageData = { id: 'u1', role: 'user', content: 'Hello?' };
+const USER_A: ChatMessageData = {
+  id: 'u1',
+  role: 'user',
+  parts: [{ kind: 'text', text: 'Hello?' }],
+};
 const ASSIST_A: ChatMessageData = {
   id: 'a1',
   role: 'assistant',
-  content: 'Hi',
+  parts: [{ kind: 'text', text: 'Hi' }],
 };
-const USER_B: ChatMessageData = { id: 'u2', role: 'user', content: 'More' };
+const USER_B: ChatMessageData = {
+  id: 'u2',
+  role: 'user',
+  parts: [{ kind: 'text', text: 'More' }],
+};
 const ASSIST_B: ChatMessageData = {
   id: 'a2',
   role: 'assistant',
-  content: 'Sure',
+  parts: [{ kind: 'text', text: 'Sure' }],
 };
 
 describe('groupTurns', () => {
@@ -99,11 +107,10 @@ describe('<Thread>', () => {
         dataSources={[]}
       />,
     );
-    // Each Turn is the top-level flex column under the turns container. The
-    // gap-10 parent has one child per turn.
-    const firstUserAvatars = container.querySelectorAll('[aria-hidden="true"]');
-    // Two turns × 2 avatars each (user + agent) = at least 4 hidden glyphs.
-    // (There may be more for svg paths inside the agent sigil.)
-    expect(firstUserAvatars.length).toBeGreaterThanOrEqual(4);
+    // Each Turn contains a user avatar (aria-hidden) and an agent-message
+    // avatar (aria-hidden). Two turns × 2 avatars each = at least 4 hidden
+    // glyphs (the sigil SVG inside the agent avatar adds more).
+    const hiddenAvatars = container.querySelectorAll('[aria-hidden="true"]');
+    expect(hiddenAvatars.length).toBeGreaterThanOrEqual(4);
   });
 });
