@@ -1,0 +1,1 @@
+Show me the list top 10 batters in the IPL since 2014 with highest true strike rates where true strike rate is (xRuns - actual runs) for each ball per 100 balls. Minimum 1000 career runs

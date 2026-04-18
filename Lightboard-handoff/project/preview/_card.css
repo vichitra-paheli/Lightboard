@@ -1,0 +1,44 @@
+/* Preview card base — small framed specimens for the Design System tab */
+@import url('../colors_and_type.css');
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500&family=Instrument+Serif&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+
+html, body { margin: 0; padding: 0; background: var(--bg-0); color: var(--ink-1); }
+* { box-sizing: border-box; }
+body {
+  font-family: var(--font-body);
+  padding: 24px;
+  min-height: 100vh;
+}
+
+.card-label {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-5);
+  margin-bottom: 12px;
+}
+
+.swatch-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.swatch {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 88px;
+}
+.swatch .chip {
+  height: 40px;
+  border-radius: 6px;
+  border: 1px solid var(--line-3);
+}
+.swatch .name {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--ink-2);
+  letter-spacing: 0.02em;
+}
+.swatch .hex {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--ink-5);
+}

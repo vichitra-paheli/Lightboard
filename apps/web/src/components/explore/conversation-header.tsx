@@ -3,12 +3,6 @@
 import { useTranslations } from 'next-intl';
 
 /**
- * Maximum length for the display title derived from the first user message.
- * Keeps the header readable on narrow threads without eating multiple lines.
- */
-const TITLE_MAX_LEN = 80;
-
-/**
  * Formats today's date as `"17 Apr"` — matches the handoff's editorial
  * eyebrow style. Uses `Intl.DateTimeFormat` so future locales switch
  * automatically. The header isn't a real persisted timestamp yet; when the
@@ -23,15 +17,14 @@ function formatHeaderDate(d: Date): string {
 }
 
 /**
- * Truncate the first-user-message to at most {@link TITLE_MAX_LEN} chars,
- * preserving trailing punctuation when we do cut. The goal is a one-line
- * headline that still reads as a question.
+ * Normalize the first-user-message into a single-spaced string. The full
+ * message is rendered — no truncation — so the user sees exactly what they
+ * asked. When backend conversation-title generation lands (see
+ * documentation/backend-ui-polish-followups.md §4), this function will be
+ * replaced by the persisted title lookup.
  */
 function deriveTitle(text: string): string {
-  const clean = text.trim().replace(/\s+/g, ' ');
-  if (clean.length <= TITLE_MAX_LEN) return clean;
-  const sliced = clean.slice(0, TITLE_MAX_LEN).replace(/[.,;:\s]+$/, '');
-  return `${sliced}…`;
+  return text.trim().replace(/\s+/g, ' ');
 }
 
 /**

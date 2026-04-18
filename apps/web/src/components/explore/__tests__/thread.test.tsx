@@ -86,8 +86,7 @@ describe('<Thread>', () => {
         dataSources={[]}
       />,
     );
-    // The header uses an h1 — use getByRole so we anchor on the semantic role,
-    // not the raw text (which would be truncated for long prompts).
+    // The header uses an h1 — use getByRole so we anchor on the semantic role.
     const heading = getByRole('heading', { level: 1 });
     expect(heading.textContent).toContain('Hello?');
   });
