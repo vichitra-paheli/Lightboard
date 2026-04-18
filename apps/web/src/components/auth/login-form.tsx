@@ -14,6 +14,7 @@ import {
 import { useTranslations } from 'next-intl';
 import { Link } from 'next-view-transitions';
 import { useState } from 'react';
+import { LightboardSigil } from '@/components/brand/lightboard-sigil';
 
 /** Props for the LoginForm component. */
 interface LoginFormProps {
@@ -40,13 +41,16 @@ export function LoginForm({ onSubmit, error }: LoginFormProps) {
 
   return (
     <Card className="w-full max-w-md">
-      <CardHeader>
+      <CardHeader className="items-center text-center">
+        <div className="mb-4 flex justify-center">
+          <LightboardSigil size={22} />
+        </div>
         <CardTitle>{t('login')}</CardTitle>
         <CardDescription>{t('loginDescription')}</CardDescription>
       </CardHeader>
       <form onSubmit={handleSubmit}>
         <CardContent className="space-y-4">
-          {error && <p className="text-sm" style={{ color: 'var(--color-destructive)' }}>{error}</p>}
+          {error && <p className="text-sm text-destructive">{error}</p>}
           <div className="space-y-2">
             <Label htmlFor="email">{t('email')}</Label>
             <Input
@@ -72,9 +76,9 @@ export function LoginForm({ onSubmit, error }: LoginFormProps) {
           <Button type="submit" className="w-full" disabled={loading}>
             {loading ? '...' : t('login')}
           </Button>
-          <p className="text-sm" style={{ color: 'var(--color-muted-foreground)' }}>
+          <p className="text-sm text-muted-foreground">
             {t('loginPrompt')}{' '}
-            <Link href="/register" className="underline" style={{ color: 'var(--color-foreground)' }}>
+            <Link href="/register" className="text-foreground underline">
               {t('register')}
             </Link>
           </p>

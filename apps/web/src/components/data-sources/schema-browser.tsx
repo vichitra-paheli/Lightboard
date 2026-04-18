@@ -42,25 +42,24 @@ export function SchemaBrowser({ tables, onClose, sourceName, loading }: SchemaBr
 
   return (
     <div className="p-6">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-semibold" style={{ color: 'var(--color-foreground)' }}>
+      <div className="mb-4 flex items-center justify-between">
+        <h3 className="text-lg font-semibold text-foreground">
           {t('schemaOf', { name: sourceName })}
         </h3>
         <button
           onClick={onClose}
-          className="rounded px-3 py-1 text-xs"
-          style={{ borderWidth: '1px', borderStyle: 'solid', borderColor: 'var(--color-border)', color: 'var(--color-muted-foreground)' }}
+          className="rounded border border-border px-3 py-1 text-xs text-muted-foreground"
         >
           {t('close')}
         </button>
       </div>
 
       {loading ? (
-        <p className="text-sm animate-pulse" style={{ color: 'var(--color-muted-foreground)' }}>
+        <p className="animate-pulse text-sm text-muted-foreground">
           Loading schema...
         </p>
       ) : tables.length === 0 ? (
-        <p className="text-sm" style={{ color: 'var(--color-muted-foreground)' }}>
+        <p className="text-sm text-muted-foreground">
           {t('noTables')}
         </p>
       ) : (
@@ -69,14 +68,13 @@ export function SchemaBrowser({ tables, onClose, sourceName, loading }: SchemaBr
             <div key={`${table.schema}.${table.name}`}>
               <button
                 onClick={() => toggleTable(table.name)}
-                className="flex w-full items-center gap-2 rounded px-3 py-2 text-sm text-left transition-colors"
-                style={{ color: 'var(--color-foreground)' }}
+                className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm text-foreground transition-colors"
               >
-                <span className="text-xs" style={{ color: 'var(--color-muted-foreground)' }}>
+                <span className="text-xs text-muted-foreground">
                   {expanded.has(table.name) ? '▼' : '▶'}
                 </span>
                 <span className="font-medium">{table.name}</span>
-                <span className="text-xs" style={{ color: 'var(--color-muted-foreground)' }}>
+                <span className="text-xs text-muted-foreground">
                   ({table.columns.length} {t('columns')})
                 </span>
               </button>
@@ -88,14 +86,14 @@ export function SchemaBrowser({ tables, onClose, sourceName, loading }: SchemaBr
                       key={col.name}
                       className="flex items-center gap-2 rounded px-2 py-1 text-xs"
                     >
-                      <span style={{ color: 'var(--color-foreground)' }}>
+                      <span className="text-foreground">
                         {col.primaryKey ? '🔑 ' : ''}{col.name}
                       </span>
-                      <span style={{ color: 'var(--color-muted-foreground)' }}>
+                      <span className="text-muted-foreground">
                         {col.type}
                       </span>
                       {col.nullable && (
-                        <span style={{ color: 'var(--color-muted-foreground)', opacity: 0.6 }}>
+                        <span className="text-muted-foreground opacity-60">
                           nullable
                         </span>
                       )}

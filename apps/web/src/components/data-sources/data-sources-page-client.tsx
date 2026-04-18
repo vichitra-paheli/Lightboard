@@ -117,7 +117,7 @@ export function DataSourcesPageClient() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
-        <p className="text-sm" style={{ color: 'var(--color-muted-foreground)' }}>Loading...</p>
+        <p className="text-sm text-muted-foreground">Loading...</p>
       </div>
     );
   }

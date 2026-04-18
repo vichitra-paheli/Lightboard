@@ -83,11 +83,11 @@ export function ViewRenderer({
       {/* Title */}
       {spec.title && (
         <div className="px-4 pt-3">
-          <h3 className="text-lg font-semibold" style={{ color: 'var(--color-foreground)' }}>
+          <h3 className="text-lg font-semibold text-foreground">
             {spec.title}
           </h3>
           {spec.description && (
-            <p className="text-sm" style={{ color: 'var(--color-muted-foreground)' }}>
+            <p className="text-sm text-muted-foreground">
               {spec.description}
             </p>
           )}
@@ -104,11 +104,8 @@ export function ViewRenderer({
       {/* Chart area */}
       <div className="flex-1 relative">
         {isLoading && !data && (
-          <div
-            className="absolute inset-0 flex items-center justify-center"
-            style={{ backgroundColor: 'var(--color-muted)', opacity: 0.5 }}
-          >
-            <div className="animate-pulse text-sm" style={{ color: 'var(--color-muted-foreground)' }}>
+          <div className="absolute inset-0 flex items-center justify-center bg-muted/50">
+            <div className="animate-pulse text-sm text-muted-foreground">
               {t('loading')}
             </div>
           </div>
@@ -116,12 +113,9 @@ export function ViewRenderer({
 
         {error && (
           <div className="p-4">
-            <div
-              className="rounded-md p-3"
-              style={{ backgroundColor: 'var(--color-destructive)', color: 'var(--color-destructive-foreground)', opacity: 0.9 }}
-            >
+            <div className="rounded-md bg-destructive/90 p-3 text-destructive-foreground">
               <p className="text-sm font-medium">{t('queryError')}</p>
-              <p className="text-xs mt-1 opacity-80">{error}</p>
+              <p className="mt-1 text-xs opacity-80">{error}</p>
             </div>
           </div>
         )}
@@ -137,20 +131,14 @@ export function ViewRenderer({
         )}
 
         {data && !plugin && (
-          <div className="p-4 text-sm" style={{ color: 'var(--color-muted-foreground)' }}>
+          <div className="p-4 text-sm text-muted-foreground">
             {t('unknownChartType', { type: spec.chart.type })}
           </div>
         )}
 
         {/* Stale indicator during re-fetch */}
         {isLoading && data && (
-          <div
-            className="absolute top-2 right-2 rounded px-2 py-1 text-xs"
-            style={{
-              backgroundColor: 'var(--color-muted)',
-              color: 'var(--color-muted-foreground)',
-            }}
-          >
+          <div className="absolute top-2 right-2 rounded bg-muted px-2 py-1 text-xs text-muted-foreground">
             {t('updating')}
           </div>
         )}

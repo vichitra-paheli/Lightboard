@@ -14,6 +14,7 @@ import {
 import { useTranslations } from 'next-intl';
 import { Link } from 'next-view-transitions';
 import { useState } from 'react';
+import { LightboardSigil } from '@/components/brand/lightboard-sigil';
 
 /** Props for the RegisterForm component. */
 interface RegisterFormProps {
@@ -42,13 +43,16 @@ export function RegisterForm({ onSubmit, error }: RegisterFormProps) {
 
   return (
     <Card className="w-full max-w-md">
-      <CardHeader>
+      <CardHeader className="items-center text-center">
+        <div className="mb-4 flex justify-center">
+          <LightboardSigil size={22} />
+        </div>
         <CardTitle>{t('register')}</CardTitle>
         <CardDescription>{t('registerDescription')}</CardDescription>
       </CardHeader>
       <form onSubmit={handleSubmit}>
         <CardContent className="space-y-4">
-          {error && <p className="text-sm" style={{ color: 'var(--color-destructive)' }}>{error}</p>}
+          {error && <p className="text-sm text-destructive">{error}</p>}
           <div className="space-y-2">
             <Label htmlFor="orgName">{t('orgName')}</Label>
             <Input
@@ -93,9 +97,9 @@ export function RegisterForm({ onSubmit, error }: RegisterFormProps) {
           <Button type="submit" className="w-full" disabled={loading}>
             {loading ? '...' : t('register')}
           </Button>
-          <p className="text-sm" style={{ color: 'var(--color-muted-foreground)' }}>
+          <p className="text-sm text-muted-foreground">
             {t('registerPrompt')}{' '}
-            <Link href="/login" className="underline" style={{ color: 'var(--color-foreground)' }}>
+            <Link href="/login" className="text-foreground underline">
               {t('login')}
             </Link>
           </p>
