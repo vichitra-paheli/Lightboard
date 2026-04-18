@@ -70,6 +70,14 @@ interface ThreadProps {
   onSaveSchema?: (markdown: string) => void;
   onCancelSchema?: () => void;
   onSchemaMarkdownChange?: (markdown: string) => void;
+  /**
+   * Invoked when the user clicks a follow-up suggestion chip on any turn.
+   * Receives the chip's label text, which the page client sends through
+   * as the next user prompt. Optional so the Thread still renders in
+   * contexts (tests, future preview surfaces) that don't need chip
+   * click-through behavior.
+   */
+  onSuggestionClick?: (text: string) => void;
 }
 
 /**
@@ -98,6 +106,7 @@ export function Thread({
   onSaveSchema,
   onCancelSchema,
   onSchemaMarkdownChange,
+  onSuggestionClick,
 }: ThreadProps) {
   const t = useTranslations('explore');
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -161,8 +170,13 @@ export function Thread({
                 key={turn.user.id ?? `turn-${i}`}
                 userMessage={turn.user}
                 assistantMessage={turn.assistant}
-                // Suggestions stay empty in PR 4 — PR 7 populates them.
+                // Suggestions come from `assistantMessage.parts` (the
+                // `{ kind: 'suggestions' }` part the page client backfills
+                // once the turn has produced at least one view). The
+                // explicit prop here stays empty — Turn prefers the parts
+                // path whenever it finds one.
                 suggestions={[]}
+                onSuggestionClick={onSuggestionClick}
               />
             ))}
           </div>
