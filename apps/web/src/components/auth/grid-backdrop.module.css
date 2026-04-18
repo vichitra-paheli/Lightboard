@@ -1,0 +1,36 @@
+/*
+ * Grid backdrop — decorative full-viewport canvas for the auth chrome.
+ *
+ * Structural rules only: positioning, stacking, fade-in. Dynamic per-frame
+ * state (trace `top`/`left` + gradient that picks a palette color at spawn)
+ * has to live as inline style on the individual trace elements; everything
+ * else is a token-backed class here.
+ */
+
+.root {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  /* Ride the auth shell's fade-in. The shell controls animation timing so the
+   * grid + traces appear together at 0ms; keeping the backdrop itself opaque
+   * here means the host can sequence it any way it wants. */
+}
+
+.svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.traceField {
+  position: absolute;
+  inset: 0;
+}
+
+.trace {
+  position: absolute;
+  border-radius: 2px;
+  will-change: left, top, opacity;
+}

@@ -1,0 +1,162 @@
+/*
+ * AuthShell — full-viewport chrome for /login and /register.
+ *
+ * Layout, choreography, and frosted-card styling live here so the components
+ * themselves stay token-driven Tailwind + tiny inline React. No hardcoded
+ * colors: every hex/rgba maps to a design-token in globals.css.
+ */
+
+/* Full-viewport stage. The auth layout is reduced to a passthrough so this
+ * element owns the entire canvas. */
+.root {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--bg-0);
+  color: var(--ink-1);
+}
+
+/* Backdrop wrapper — exists so the grid can fade up on mount independently of
+ * the rest of the chrome's timing. */
+.backdrop {
+  position: absolute;
+  inset: 0;
+  animation: lb-auth-bg-fade-in 800ms var(--ease-out-quint) both;
+}
+
+/* Top-left build tag. `lb-mono-tag` gives us the mono uppercase type; the
+ * rest is positioning + a deferred fade-in at 2600ms to sit alongside the
+ * fine-print at the bottom. */
+.buildTag {
+  position: absolute;
+  top: 24px;
+  left: 28px;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-weight: 500;
+  opacity: 0;
+  animation: lb-auth-chrome-fade-in 600ms var(--ease-out-quint) 2600ms both;
+}
+
+/* Bottom-right fine print. Same deferred fade-in, staggered 200ms later. */
+.finePrint {
+  position: absolute;
+  bottom: 20px;
+  right: 28px;
+  display: flex;
+  gap: 18px;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-weight: 500;
+  opacity: 0;
+  animation: lb-auth-chrome-fade-in 600ms var(--ease-out-quint) 2800ms both;
+}
+
+.finePrintLink {
+  color: inherit;
+  text-decoration: none;
+  transition: color 180ms var(--ease-out-quint);
+}
+
+.finePrintLink:hover {
+  color: var(--ink-2);
+}
+
+/* Center column — sigil, tagline, then children. */
+.centerStack {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 38px;
+  padding: 24px;
+}
+
+/* Sigil + tagline cluster. */
+.brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+}
+
+.tagline {
+  font-family: var(--font-body), 'Inter', system-ui, sans-serif;
+  font-size: 13.5px;
+  color: var(--ink-3);
+  letter-spacing: 0.02em;
+  text-align: center;
+  opacity: 0;
+  transform: translateY(4px);
+  transition:
+    opacity 520ms var(--ease-out-quint),
+    transform 520ms var(--ease-out-quint);
+}
+
+.tagline[data-visible='true'] {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Children wrapper — drops in at 2200ms (the form card). */
+.cardWrap {
+  opacity: 0;
+  transform: translateY(-18px);
+  transition:
+    opacity 520ms var(--ease-out-quint),
+    transform 640ms var(--ease-out-quint);
+}
+
+.cardWrap[data-visible='true'] {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@keyframes lb-auth-bg-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes lb-auth-chrome-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .backdrop,
+  .buildTag,
+  .finePrint,
+  .tagline,
+  .cardWrap {
+    animation: none;
+    transition: none;
+  }
+  .buildTag,
+  .finePrint {
+    opacity: 1;
+  }
+  .tagline[data-visible='true'],
+  .cardWrap[data-visible='true'] {
+    opacity: 1;
+    transform: none;
+  }
+  /* When reduced-motion is set but the timers haven't fired yet we still want
+   * the content visible so the page is usable; we just drop the transition. */
+  .tagline,
+  .cardWrap {
+    opacity: 1;
+    transform: none;
+  }
+}
