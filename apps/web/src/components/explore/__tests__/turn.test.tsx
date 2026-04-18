@@ -15,22 +15,28 @@ globalThis.fetch = vi.fn(async () =>
 const USER: ChatMessageData = {
   id: 'u',
   role: 'user',
-  content: 'Show me the top batters',
+  parts: [{ kind: 'text', text: 'Show me the top batters' }],
 };
 
-const ASSIST: ChatMessageData = {
+const ASSIST_INTERLEAVED: ChatMessageData = {
   id: 'a',
   role: 'assistant',
-  content: 'Here you go',
-  toolCalls: [
-    { name: 'run_sql', status: 'done', durationMs: 42 },
+  // Parts[] preserves the temporal order: text → tool → chart → text.
+  parts: [
+    { kind: 'text', text: 'Planning the query…' },
+    { kind: 'tool_call', name: 'run_sql', status: 'done', durationMs: 42 },
+    {
+      kind: 'view',
+      view: {
+        title: 'Top batters',
+        description: 'IPL 2014+',
+        sql: 'SELECT 1',
+        html: '<html><body>chart</body></html>',
+      },
+      data: null,
+    },
+    { kind: 'text', text: 'Here you go' },
   ],
-  view: {
-    title: 'Top batters',
-    description: 'IPL 2014+',
-    sql: 'SELECT 1',
-    html: '<html><body>chart</body></html>',
-  },
 };
 
 describe('<Turn>', () => {
@@ -38,60 +44,104 @@ describe('<Turn>', () => {
     cleanup();
   });
 
-  it('renders in the editorial order: user → trace → chart → agent text', () => {
+  it('renders user message and an assistant stream in that order', () => {
     const { container } = render(
-      <Turn userMessage={USER} assistantMessage={ASSIST} />,
+      <Turn userMessage={USER} assistantMessage={ASSIST_INTERLEAVED} />,
     );
-    // Walk the top-level children of the turn container and identify each
-    // block by a unique marker. The turn wrapper is a flex column whose
-    // direct children are the blocks in order.
     const turnRoot = container.firstElementChild;
     expect(turnRoot).toBeTruthy();
     const blocks = Array.from(turnRoot!.children);
 
     // Block 0 — user message (contains the prompt text).
     expect(blocks[0]?.textContent).toContain('Show me the top batters');
-
-    // Block 1 — trace card (has our shared background class token).
-    expect(blocks[1]?.getAttribute('style') ?? '').toContain('var(--bg-3)');
-
-    // Block 2 — inline chart frame (has bg-5 + rounded-[14px]).
-    expect(blocks[2]?.getAttribute('style') ?? '').toContain('var(--bg-5)');
-
-    // Block 3 — agent text. Contains the markdown-rendered content.
-    expect(blocks[3]?.textContent).toContain('Here you go');
+    // Block 1 — the assistant stream wrapper.
+    expect(blocks[1]).toBeTruthy();
+    expect(blocks[1]?.textContent).toContain('Planning the query');
+    expect(blocks[1]?.textContent).toContain('Here you go');
+    expect(blocks[1]?.textContent).toContain('run_sql');
   });
 
-  it('omits the chart block when no view is attached', () => {
+  it('renders each part in its ordered slot inside the assistant stream', () => {
     const { container } = render(
-      <Turn
-        userMessage={USER}
-        assistantMessage={{ ...ASSIST, view: undefined }}
-      />,
+      <Turn userMessage={USER} assistantMessage={ASSIST_INTERLEAVED} />,
     );
-    const turnRoot = container.firstElementChild;
-    const blocks = Array.from(turnRoot!.children);
-    // user + trace + agent text = 3 blocks.
-    expect(blocks.length).toBe(3);
+    // The assistant stream is the 2nd top-level block. Its children are
+    // one block per part (tool rows nested under a solo wrapper).
+    const turnRoot = container.firstElementChild!;
+    const stream = turnRoot.children[1]!;
+    const streamChildren = Array.from(stream.children);
+
+    // text → tool → view → text = 4 stream children.
+    expect(streamChildren.length).toBe(4);
+    // First text part comes before the tool row.
+    expect(streamChildren[0]?.textContent).toContain('Planning the query');
+    // Tool call row is wrapped in a solo-trace div.
+    expect(streamChildren[1]?.textContent).toContain('run_sql');
+    // View has the bg-5 inline style token.
+    expect(streamChildren[2]?.getAttribute('style') ?? '').toContain(
+      'var(--bg-5)',
+    );
+    // Final text part.
+    expect(streamChildren[3]?.textContent).toContain('Here you go');
   });
 
-  it('omits the trace block when no tool calls / thinking / delegations are present', () => {
+  it('omits the chart block when no view part is attached', () => {
+    const assistant: ChatMessageData = {
+      id: 'a',
+      role: 'assistant',
+      parts: [{ kind: 'text', text: 'No chart here' }],
+    };
     const { container } = render(
-      <Turn
-        userMessage={USER}
-        assistantMessage={{
-          ...ASSIST,
-          toolCalls: [],
-          agentDelegations: [],
-          thinking: undefined,
-          view: undefined,
-        }}
-      />,
+      <Turn userMessage={USER} assistantMessage={assistant} />,
     );
-    const turnRoot = container.firstElementChild;
-    // The placeholder returns null when empty, so children are
-    // user + agent text (no trace, no chart).
-    const blocks = Array.from(turnRoot!.children);
-    expect(blocks.length).toBe(2);
+    const turnRoot = container.firstElementChild!;
+    const stream = turnRoot.children[1]!;
+    // Only a single text part — stream has 1 child.
+    expect(stream.children.length).toBe(1);
+  });
+
+  it('clusters consecutive tool calls into a single trace cluster', () => {
+    const assistant: ChatMessageData = {
+      id: 'a',
+      role: 'assistant',
+      parts: [
+        { kind: 'tool_call', name: 'get_schema', status: 'done' },
+        { kind: 'tool_call', name: 'run_sql', status: 'done' },
+        { kind: 'text', text: 'Done.' },
+      ],
+    };
+    const { container } = render(
+      <Turn userMessage={USER} assistantMessage={assistant} />,
+    );
+    const turnRoot = container.firstElementChild!;
+    const stream = turnRoot.children[1]!;
+    // Two consecutive trace rows = 1 cluster + 1 text = 2 stream children.
+    expect(stream.children.length).toBe(2);
+    // The first child (cluster) contains both tool names.
+    expect(stream.children[0]?.textContent).toContain('get_schema');
+    expect(stream.children[0]?.textContent).toContain('run_sql');
+  });
+
+  it('preserves text between tool calls as a separate block (the PR 5 fix)', () => {
+    const assistant: ChatMessageData = {
+      id: 'a',
+      role: 'assistant',
+      parts: [
+        { kind: 'text', text: 'Before tool.' },
+        { kind: 'tool_call', name: 'run_sql', status: 'done' },
+        { kind: 'text', text: 'After tool.' },
+      ],
+    };
+    const { container } = render(
+      <Turn userMessage={USER} assistantMessage={assistant} />,
+    );
+    const turnRoot = container.firstElementChild!;
+    const stream = turnRoot.children[1]!;
+    // text → tool → text = 3 stream children; tool renders as solo
+    // (single trace row, no cluster wrapper).
+    expect(stream.children.length).toBe(3);
+    expect(stream.children[0]?.textContent).toContain('Before tool.');
+    expect(stream.children[1]?.textContent).toContain('run_sql');
+    expect(stream.children[2]?.textContent).toContain('After tool.');
   });
 });

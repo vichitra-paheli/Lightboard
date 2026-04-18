@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import { useTranslations } from 'next-intl';
-import type { ChatMessageData } from './chat-message';
+import { getFirstText, type ChatMessageData } from './chat-message';
 import { ConversationHeader } from './conversation-header';
 import { SchemaCurationPanel } from './schema-curation-panel';
 import { Turn } from './turn';
@@ -109,7 +109,7 @@ export function Thread({
   }, [messages]);
 
   const turns = groupTurns(messages);
-  const firstUser = turns[0]?.user.content ?? '';
+  const firstUser = turns[0]?.user ? getFirstText(turns[0]!.user) : '';
   const source = dataSources.find((s) => s.id === selectedSource) ?? null;
   const hasMessages = messages.length > 0;
   const hasSchemaCuration = !!schemaCuration;
