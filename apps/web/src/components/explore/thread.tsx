@@ -78,6 +78,12 @@ interface ThreadProps {
    * click-through behavior.
    */
   onSuggestionClick?: (text: string) => void;
+  /**
+   * Label text of the suggestion chip that's currently waiting on a send
+   * to connect. Threaded through to the matching turn so the chip shows a
+   * loader during the open-connection gap.
+   */
+  activeSuggestion?: string | null;
 }
 
 /**
@@ -107,6 +113,7 @@ export function Thread({
   onCancelSchema,
   onSchemaMarkdownChange,
   onSuggestionClick,
+  activeSuggestion,
 }: ThreadProps) {
   const t = useTranslations('explore');
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -177,6 +184,7 @@ export function Thread({
                 // path whenever it finds one.
                 suggestions={[]}
                 onSuggestionClick={onSuggestionClick}
+                activeSuggestion={activeSuggestion}
               />
             ))}
           </div>

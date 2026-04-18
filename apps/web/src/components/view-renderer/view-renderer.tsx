@@ -100,6 +100,7 @@ export function ViewRenderer({
         controls={spec.controls}
         values={variables}
         onChange={handleVariableChange}
+        isLoading={isLoading}
       />
 
       {/* Chart area */}
@@ -138,8 +139,9 @@ export function ViewRenderer({
 
         {/* Stale indicator during re-fetch */}
         {isLoading && data && (
-          <div className="absolute top-2 right-2 rounded bg-muted px-2 py-1 text-xs text-muted-foreground">
-            {t('updating')}
+          <div className="absolute top-2 right-2 flex items-center gap-1.5 rounded bg-muted px-2 py-1 text-xs text-muted-foreground">
+            <LightboardLoader size={12} ariaLabel="" />
+            <span>{t('updating')}</span>
           </div>
         )}
       </div>

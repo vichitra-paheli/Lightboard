@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { LightboardLoader } from '../brand';
 
@@ -29,8 +30,12 @@ export function SchemaCurationPanel({
   onMarkdownChange,
 }: SchemaCurationPanelProps) {
   const t = useTranslations('explore');
+  // Transient flag covering the click → `phase==='generating'` re-render
+  // gap. Kept local so parents don't need to thread a separate boolean.
+  const [clickedGenerate, setClickedGenerate] = useState(false);
 
   if (phase === 'callout') {
+    const generatingFeedback = clickedGenerate;
     return (
       <div className="flex h-full items-center justify-center">
         <div className="max-w-md text-center">
@@ -59,14 +64,25 @@ export function SchemaCurationPanel({
             {t('schemaSetupDescription', { sourceName })}
           </p>
           <button
-            onClick={onGenerate}
-            className="mt-6 rounded-md px-6 py-2 text-sm font-medium transition-colors"
+            onClick={() => {
+              setClickedGenerate(true);
+              onGenerate();
+            }}
+            disabled={generatingFeedback}
+            className="mt-6 inline-flex items-center gap-2 rounded-md px-6 py-2 text-sm font-medium transition-colors disabled:opacity-80"
             style={{
               backgroundColor: 'var(--color-primary)',
               color: 'var(--color-primary-foreground)',
             }}
           >
-            {t('schemaGenerate')}
+            {generatingFeedback && (
+              <LightboardLoader size={12} ariaLabel="" />
+            )}
+            <span>
+              {generatingFeedback
+                ? t('schemaGeneratingButton')
+                : t('schemaGenerate')}
+            </span>
           </button>
         </div>
       </div>
@@ -118,13 +134,16 @@ export function SchemaCurationPanel({
           <button
             onClick={() => onSave(markdown)}
             disabled={phase === 'saving'}
-            className="rounded-md px-4 py-1.5 text-xs font-medium transition-colors disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-md px-4 py-1.5 text-xs font-medium transition-colors disabled:opacity-50"
             style={{
               backgroundColor: 'var(--color-primary)',
               color: 'var(--color-primary-foreground)',
             }}
           >
-            {phase === 'saving' ? t('schemaSaving') : t('schemaSave')}
+            {phase === 'saving' && (
+              <LightboardLoader size={12} ariaLabel="" />
+            )}
+            <span>{phase === 'saving' ? t('schemaSaving') : t('schemaSave')}</span>
           </button>
         </div>
       </div>

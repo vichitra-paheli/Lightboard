@@ -3,6 +3,8 @@
 import { useTranslations } from 'next-intl';
 import { useState } from 'react';
 
+import { LightboardLoader } from '../brand';
+
 /** A data source record. */
 export interface DataSourceRecord {
   id: string;
@@ -19,6 +21,12 @@ interface DataSourceListProps {
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
   onBrowseSchema: (id: string) => void;
+  /**
+   * ID of the source whose DELETE request is currently in flight. The
+   * matching confirm button renders a 12px loader and disables while the
+   * request is pending; the parent clears this when the request settles.
+   */
+  deletingId?: string | null;
 }
 
 /**
@@ -38,7 +46,7 @@ function statusDotColor(status: DataSourceRecord['status']): string {
 }
 
 /** List of configured data sources with health status indicators. */
-export function DataSourceList({ sources, onAdd, onEdit, onDelete, onBrowseSchema }: DataSourceListProps) {
+export function DataSourceList({ sources, onAdd, onEdit, onDelete, onBrowseSchema, deletingId }: DataSourceListProps) {
   const t = useTranslations('dataSources');
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
@@ -93,14 +101,19 @@ export function DataSourceList({ sources, onAdd, onEdit, onDelete, onBrowseSchem
                 {deleteConfirm === source.id ? (
                   <div className="flex gap-1">
                     <button
-                      onClick={() => { onDelete(source.id); setDeleteConfirm(null); }}
-                      className="rounded bg-destructive px-3 py-1 text-xs text-destructive-foreground"
+                      onClick={() => { onDelete(source.id); }}
+                      disabled={deletingId === source.id}
+                      className="inline-flex items-center gap-1.5 rounded bg-destructive px-3 py-1 text-xs text-destructive-foreground disabled:opacity-80"
                     >
-                      {t('confirmDelete')}
+                      {deletingId === source.id && (
+                        <LightboardLoader size={12} ariaLabel="" />
+                      )}
+                      <span>{t('confirmDelete')}</span>
                     </button>
                     <button
                       onClick={() => setDeleteConfirm(null)}
-                      className="rounded border border-border px-3 py-1 text-xs text-muted-foreground"
+                      disabled={deletingId === source.id}
+                      className="rounded border border-border px-3 py-1 text-xs text-muted-foreground disabled:opacity-60"
                     >
                       {t('cancel')}
                     </button>

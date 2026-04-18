@@ -1,8 +1,11 @@
 'use client';
 
+import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { useUiStore } from '@/stores/ui-store';
 import { cn } from '@/lib/utils';
+
+import { LightboardLoader } from '../brand';
 
 /**
  * Collapsible 240px left sidebar. Primary nav was removed in PR 3 (it lives
@@ -23,9 +26,18 @@ export function Sidebar() {
   const t = useTranslations('nav');
   const open = useUiStore((s) => s.sidebarOpen);
   const slot = useUiStore((s) => s.sidebarSlot);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   async function handleLogout() {
-    await fetch('/api/auth/logout', { method: 'POST' });
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch {
+      // Swallow — the hard navigation below forces a redirect through the
+      // login page regardless of the fetch outcome, so there's nothing to
+      // surface to the user here.
+    }
     // Use hard navigation to clear all client state and let middleware redirect.
     window.location.href = '/login';
   }
@@ -55,10 +67,12 @@ export function Sidebar() {
       <div className="flex-none pt-2">
         <button
           onClick={handleLogout}
-          className="rounded-md px-1 py-1 text-left text-[12.5px] text-[var(--ink-3)] transition-colors hover:text-[var(--ink-1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-warm)]"
+          disabled={loggingOut}
+          className="inline-flex items-center gap-2 rounded-md px-1 py-1 text-left text-[12.5px] text-[var(--ink-3)] transition-colors hover:text-[var(--ink-1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-warm)] disabled:opacity-80"
           style={{ fontFamily: 'var(--font-body), Inter, system-ui, sans-serif' }}
         >
-          {t('logout')}
+          {loggingOut && <LightboardLoader size={12} ariaLabel="" />}
+          <span>{loggingOut ? t('loggingOut') : t('logout')}</span>
         </button>
       </div>
     </aside>

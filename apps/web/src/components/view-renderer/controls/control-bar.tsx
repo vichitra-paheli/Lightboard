@@ -1,6 +1,8 @@
 'use client';
 
 import type { ControlSpec } from '@lightboard/viz-core';
+
+import { LightboardLoader } from '../../brand';
 import { DateRangeControl } from './date-range-control';
 import { DropdownControl } from './dropdown-control';
 import { TextInputControl } from './text-input-control';
@@ -11,13 +13,24 @@ interface ControlBarProps {
   controls: ControlSpec[];
   values: Record<string, unknown>;
   onChange: (variable: string, value: unknown) => void;
+  /**
+   * When true, render a 14px LightboardLoader at the trailing end of the
+   * bar. Signals that the chart is re-querying as a result of a control
+   * change so the user knows their input was received.
+   */
+  isLoading?: boolean;
 }
 
 /**
  * Renders a horizontal bar of interactive controls above the chart.
  * Each control is bound to a template variable in the QueryIR.
  */
-export function ControlBar({ controls, values, onChange }: ControlBarProps) {
+export function ControlBar({
+  controls,
+  values,
+  onChange,
+  isLoading,
+}: ControlBarProps) {
   if (controls.length === 0) return null;
 
   return (
@@ -71,6 +84,11 @@ export function ControlBar({ controls, values, onChange }: ControlBarProps) {
             return null;
         }
       })}
+      {isLoading && (
+        <div className="ml-auto flex items-end pb-1">
+          <LightboardLoader size={14} />
+        </div>
+      )}
     </div>
   );
 }

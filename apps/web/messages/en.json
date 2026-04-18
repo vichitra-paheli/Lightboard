@@ -16,7 +16,8 @@
     "explore": "Explore",
     "views": "Views",
     "settings": "Settings",
-    "logout": "Log out"
+    "logout": "Log out",
+    "loggingOut": "Logging out…"
   },
   "topBar": {
     "toggleSidebar": "Toggle sidebar",
@@ -54,6 +55,7 @@
     "schemaSetupTitle": "Set up schema documentation",
     "schemaSetupDescription": "Generate AI-annotated schema documentation for \"{sourceName}\" to help the agent write better queries. This takes about 15 seconds.",
     "schemaGenerate": "Generate Schema Documentation",
+    "schemaGeneratingButton": "Generating…",
     "schemaGenerating": "Generating schema documentation...",
     "schemaGeneratingHint": "Introspecting database and annotating with AI",
     "schemaEditorTitle": "Schema Documentation — {sourceName}",
@@ -85,6 +87,8 @@
     "user": "User",
     "password": "Password",
     "save": "Save",
+    "saving": "Saving…",
+    "testing": "Testing…",
     "cancel": "Cancel",
     "edit": "Edit",
     "delete": "Delete",

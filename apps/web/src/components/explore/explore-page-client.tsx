@@ -65,6 +65,20 @@ export function ExplorePageClient() {
   const t = useTranslations('explore');
   const [messages, setMessages] = useState<ChatMessageData[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
+  // Transient flag covering the gap between a send click and the first
+  // server-sent event arriving. Clears once fetch() resolves response
+  // headers so the loader inside the send button maps to a real
+  // "waiting on the server" window rather than the full streaming turn.
+  const [isSending, setIsSending] = useState(false);
+  // Transient flag covering the gap between an abort click and the fetch
+  // promise settling. The abort round-trip is usually <100ms so this is a
+  // brief flash — its job is to confirm the click was registered.
+  const [isAborting, setIsAborting] = useState(false);
+  // When the user clicks a suggestion chip, the matching chip renders a
+  // loader in place of its text until the open-connection gap clears.
+  // Shares its lifecycle with `isSending` — set when the click fires,
+  // cleared when fetch() resolves or the turn errors out.
+  const [activeSuggestion, setActiveSuggestion] = useState<string | null>(null);
   const [selectedSource, setSelectedSource] = useState<string | null>(null);
   const [activeViewIndex, setActiveViewIndex] = useState(-1);
   // Ephemeral per-session flag — deliberately not persisted across reloads.
@@ -426,6 +440,7 @@ export function ExplorePageClient() {
       };
       setMessages((prev) => [...prev, userMsg]);
       setIsStreaming(true);
+      setIsSending(true);
 
       const assistantMsgId = `msg_${Date.now()}_reply`;
 
@@ -459,6 +474,12 @@ export function ExplorePageClient() {
           }),
           signal: controller.signal,
         });
+
+        // Server responded — the open-connection gap is over. Clear the
+        // send-button / suggestion-chip loader before any event processing
+        // so the user sees the streaming content take over.
+        setIsSending(false);
+        setActiveSuggestion(null);
 
         if (!response.ok) {
           const errData = await response.json().catch(() => ({}));
@@ -599,6 +620,9 @@ export function ExplorePageClient() {
         }
       } finally {
         setIsStreaming(false);
+        setIsSending(false);
+        setIsAborting(false);
+        setActiveSuggestion(null);
         abortControllerRef.current = null;
         activeReducerRef.current = null;
       }
@@ -612,6 +636,7 @@ export function ExplorePageClient() {
    * UI doesn't leave a spinning dot stuck on the page.
    */
   const handleStop = useCallback(() => {
+    setIsAborting(true);
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
@@ -625,6 +650,9 @@ export function ExplorePageClient() {
         return { ...m, parts: nextParts, isStreaming: false };
       }),
     );
+    // The fetch promise rejection + handleSend's finally clears isAborting
+    // on the next microtask. This set above is the immediate visual cue
+    // for the user that the click landed.
   }, []);
 
   /** Generate schema documentation by sending a chat message that triggers exploration. */
@@ -751,7 +779,11 @@ export function ExplorePageClient() {
           onSchemaMarkdownChange={(md) =>
             setSchemaCuration((prev) => (prev ? { ...prev, markdown: md } : null))
           }
-          onSuggestionClick={handleSend}
+          onSuggestionClick={(text) => {
+            setActiveSuggestion(text);
+            handleSend(text);
+          }}
+          activeSuggestion={activeSuggestion}
         />
 
         {/*
@@ -778,6 +810,8 @@ export function ExplorePageClient() {
           onSend={handleSend}
           onStop={handleStop}
           isStreaming={isStreaming}
+          isSending={isSending}
+          isAborting={isAborting}
           selectedSourceMeta={activeSource ? { name: activeSource.name } : null}
         />
 
