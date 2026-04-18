@@ -7,6 +7,7 @@ import {
 } from '@lightboard/viz-core';
 import { useTranslations } from 'next-intl';
 import { useCallback, useMemo, useState } from 'react';
+import { LightboardLoader } from '../brand';
 import { ControlBar } from './controls/control-bar';
 
 /** Props for the ViewRenderer component. */
@@ -104,10 +105,9 @@ export function ViewRenderer({
       {/* Chart area */}
       <div className="flex-1 relative">
         {isLoading && !data && (
-          <div className="absolute inset-0 flex items-center justify-center bg-muted/50">
-            <div className="animate-pulse text-sm text-muted-foreground">
-              {t('loading')}
-            </div>
+          <div className="absolute inset-0 flex items-center justify-center gap-2 bg-muted/50">
+            <LightboardLoader size={14} />
+            <span className="text-sm text-muted-foreground">{t('loading')}</span>
           </div>
         )}
 

@@ -123,30 +123,6 @@ export function ArrowIcon({ className }: { className?: string }) {
   );
 }
 
-/** Spinner — shown in the primary button while submitting. */
-export function SpinnerIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 12 12"
-      aria-hidden="true"
-      className={className}
-    >
-      <circle
-        cx="6"
-        cy="6"
-        r="4.5"
-        stroke="currentColor"
-        strokeWidth="1.3"
-        fill="none"
-        strokeDasharray="18 10"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
 /** Google brand glyph — decorative; the button's visible label carries the name. */
 export function GoogleIcon() {
   return (
