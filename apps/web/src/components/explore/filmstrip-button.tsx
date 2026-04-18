@@ -1,7 +1,8 @@
 'use client';
 
+import { useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { PanelRight } from 'lucide-react';
+import { Grid3x3 } from 'lucide-react';
 
 /**
  * Props for {@link FilmstripButton}.
@@ -11,46 +12,86 @@ interface FilmstripButtonProps {
   open: boolean;
   /** Fired on click — parent flips the open/closed state. */
   onToggle: () => void;
+  /** Number of views in history. Rendered inside a small mono count pill. */
+  count: number;
 }
 
 /**
- * Small icon toggle that opens / closes the filmstrip right slide-out.
- * Fixed-positioned at the top-right of the viewport so it floats above the
- * thread without occupying thread chrome space — the thread itself is a
- * pure content column in PR 4's editorial layout.
+ * Rounded pill toggle that opens / closes the filmstrip right slide-out.
  *
- * When open, the button fills with `--accent-bg` to echo the active-card
- * styling inside the panel. That reuses the same accent token both surfaces
- * share, so theme tweaks propagate without touching this component.
+ * Layout matches the editorial handoff: `[icon] Filmstrip [6]` — a grid
+ * glyph on the left, a mid-weight label, and a small mono count badge on
+ * the right. The button is rendered as a sibling of the ConversationHeader
+ * by {@link Thread}, anchored to the top-right of the 920px centered
+ * content column via `position: absolute` so it sits level with the
+ * eyebrow row without consuming flow space.
+ *
+ * When open (panel expanded), the button adopts `--accent-bg` +
+ * `--accent-border` so it visually binds to the active card styling inside
+ * the panel. Hover/idle states use `--bg-6` / transparent so the button
+ * feels contiguous with the thread background.
+ *
+ * Hidden when `count === 0` — an empty filmstrip would dead-end a click.
+ * The empty-state surface is the thread itself, not a zero-count button.
  */
-export function FilmstripButton({ open, onToggle }: FilmstripButtonProps) {
+export function FilmstripButton({ open, onToggle, count }: FilmstripButtonProps) {
   const t = useTranslations('explore');
-  const label = open ? t('filmstripClose') : t('filmstripOpen');
+  const [hover, setHover] = useState(false);
+
+  if (count <= 0) return null;
+
+  const ariaLabel = open ? t('filmstripClose') : t('filmstripOpen');
+
+  // Precompute the three background states so the inline style is a single
+  // conditional rather than three nested ternaries in the `style` prop.
+  const background = open
+    ? 'var(--accent-bg)'
+    : hover
+      ? 'var(--bg-6)'
+      : 'var(--bg-4)';
+  const borderColor = open ? 'var(--accent-border)' : 'var(--line-3)';
+  const color = open ? 'var(--accent-ink)' : 'var(--ink-2)';
 
   return (
     <button
       type="button"
       onClick={onToggle}
-      aria-label={label}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      aria-label={ariaLabel}
+      aria-expanded={open}
       aria-pressed={open}
       data-filmstrip-button
-      className="fixed right-4 top-4 inline-flex h-9 w-9 items-center justify-center rounded-lg transition-colors"
+      className="inline-flex items-center gap-2 transition-colors"
       style={{
-        // Sit above the panel (z=5) and above the composer (z=10) so the
-        // button is always reachable while the panel is animating.
-        zIndex: 20,
-        background: open ? 'var(--accent-bg)' : 'transparent',
-        border: `1px solid ${open ? 'var(--accent-border)' : 'var(--line-3)'}`,
-        color: open ? 'var(--ink-1)' : 'var(--ink-2)',
-      }}
-      onMouseEnter={(e) => {
-        if (!open) e.currentTarget.style.background = 'var(--bg-6)';
-      }}
-      onMouseLeave={(e) => {
-        if (!open) e.currentTarget.style.background = 'transparent';
+        padding: '7px 10px 7px 10px',
+        borderRadius: 999,
+        background,
+        border: `1px solid ${borderColor}`,
+        color,
+        fontFamily: 'var(--font-body)',
+        fontSize: 12,
+        lineHeight: 1,
+        cursor: 'pointer',
       }}
     >
-      <PanelRight size={16} aria-hidden="true" />
+      <Grid3x3 size={13} aria-hidden="true" strokeWidth={1.25} />
+      <span>{t('filmstripLabel')}</span>
+      <span
+        style={{
+          fontFamily: 'var(--font-mono)',
+          fontSize: 10,
+          letterSpacing: '0.04em',
+          color: open ? 'var(--accent-ink)' : 'var(--ink-5)',
+          padding: '2px 6px',
+          borderRadius: 6,
+          background: open ? 'var(--bg-7)' : 'var(--bg-6)',
+          minWidth: 18,
+          textAlign: 'center',
+        }}
+      >
+        {count}
+      </span>
     </button>
   );
 }

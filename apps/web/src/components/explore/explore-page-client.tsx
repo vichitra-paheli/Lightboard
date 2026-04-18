@@ -717,6 +717,13 @@ export function ExplorePageClient() {
           onSchemaMarkdownChange={(md) =>
             setSchemaCuration((prev) => (prev ? { ...prev, markdown: md } : null))
           }
+          topRightSlot={
+            <FilmstripButton
+              open={filmstripOpen}
+              onToggle={() => setFilmstripOpen((v) => !v)}
+              count={viewHistory.length}
+            />
+          }
         />
 
         <Composer
@@ -724,11 +731,6 @@ export function ExplorePageClient() {
           onStop={handleStop}
           isStreaming={isStreaming}
           selectedSourceMeta={activeSource ? { name: activeSource.name } : null}
-        />
-
-        <FilmstripButton
-          open={filmstripOpen}
-          onToggle={() => setFilmstripOpen((v) => !v)}
         />
 
         <FilmstripPanel
