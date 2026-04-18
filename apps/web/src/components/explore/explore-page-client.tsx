@@ -87,8 +87,9 @@ export function ExplorePageClient() {
   /**
    * Derived view history — scans every assistant message's parts[] for
    * `{ kind: 'view' }` entries and filters down to HtmlView (the only
-   * kind the bottom-strip filmstrip understands). The filmstrip stays
-   * imported (hidden) through PR 6 so a PR revert doesn't break the build.
+   * kind the slide-out FilmstripPanel understands). Recomputed from
+   * `messages` so reopening a conversation rebuilds the strip automatically
+   * from the same source of truth the thread renders from.
    */
   const viewHistory = useMemo<HtmlView[]>(() => {
     const out: HtmlView[] = [];
