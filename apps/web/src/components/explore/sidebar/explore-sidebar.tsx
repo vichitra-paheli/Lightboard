@@ -1,6 +1,6 @@
 'use client';
 
-import type { DataSourceOption } from '../data-source-selector';
+import type { DataSourceOption } from '../types';
 import { ConversationsList } from './conversations-list';
 import { DatabasePicker } from './database-picker';
 import { NewChatButton } from './new-chat-button';

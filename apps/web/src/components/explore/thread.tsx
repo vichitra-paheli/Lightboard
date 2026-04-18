@@ -6,7 +6,7 @@ import type { ChatMessageData } from './chat-message';
 import { ConversationHeader } from './conversation-header';
 import { SchemaCurationPanel } from './schema-curation-panel';
 import { Turn } from './turn';
-import type { DataSourceOption } from './data-source-selector';
+import type { DataSourceOption } from './types';
 
 /**
  * Groups a flat `messages[]` list into per-turn pairs. A turn begins at a

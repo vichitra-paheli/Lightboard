@@ -60,7 +60,7 @@ export function InlineChartFrame({
         <ViewRenderer
           spec={view}
           data={data ?? null}
-          isLoading={isLoading}
+          isLoading={!!isLoading}
           error={null}
           width={800}
           height={600}

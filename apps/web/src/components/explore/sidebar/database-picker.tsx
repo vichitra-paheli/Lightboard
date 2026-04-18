@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { DataSourceOption } from '../data-source-selector';
+import type { DataSourceOption } from '../types';
 import { Label } from './label';
 
 /**

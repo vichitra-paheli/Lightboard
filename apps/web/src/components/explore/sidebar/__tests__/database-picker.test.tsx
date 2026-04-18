@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render } from '@testing-library/react';
 import { DatabasePicker } from '../database-picker';
-import type { DataSourceOption } from '../../data-source-selector';
+import type { DataSourceOption } from '../../types';
 
 const SOURCES: DataSourceOption[] = [
   { id: 'cricket', name: 'cricket', type: 'postgres' },
