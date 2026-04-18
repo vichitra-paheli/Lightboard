@@ -48,14 +48,14 @@ export function HtmlViewRenderer({ view, isLoading }: HtmlViewRendererProps) {
     <div className="flex h-full flex-col">
       {/* Header */}
       {(view.title || view.description) && (
-        <div className="shrink-0 border-b px-6 py-4" style={{ borderColor: 'var(--color-border)' }}>
+        <div className="shrink-0 border-b border-border px-6 py-4">
           {view.title && (
-            <h2 className="text-lg font-semibold" style={{ color: 'var(--color-foreground)' }}>
+            <h2 className="text-lg font-semibold text-foreground">
               {view.title}
             </h2>
           )}
           {view.description && (
-            <p className="mt-1 text-sm" style={{ color: 'var(--color-muted-foreground)' }}>
+            <p className="mt-1 text-sm text-muted-foreground">
               {view.description}
             </p>
           )}

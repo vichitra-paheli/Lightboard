@@ -30,7 +30,7 @@ export function TextInputControl({ spec, value, onChange }: TextInputControlProp
 
   return (
     <div className="flex flex-col gap-1">
-      <label className="text-xs font-medium" style={{ color: 'var(--color-muted-foreground)' }}>
+      <label className="text-xs font-medium text-muted-foreground">
         {spec.label}
       </label>
       <input
@@ -38,14 +38,7 @@ export function TextInputControl({ spec, value, onChange }: TextInputControlProp
         value={localValue}
         onChange={(e) => handleChange(e.target.value)}
         placeholder={spec.label}
-        className="h-8 rounded-md px-2 text-sm"
-        style={{
-          borderWidth: '1px',
-          borderStyle: 'solid',
-          borderColor: 'var(--color-input)',
-          backgroundColor: 'transparent',
-          color: 'var(--color-foreground)',
-        }}
+        className="h-8 rounded-md border border-input bg-transparent px-2 text-sm text-foreground"
       />
     </div>
   );

@@ -13,22 +13,20 @@ interface ToggleControlProps {
 export function ToggleControl({ spec, value, onChange }: ToggleControlProps) {
   return (
     <div className="flex flex-col gap-1">
-      <label className="text-xs font-medium" style={{ color: 'var(--color-muted-foreground)' }}>
+      <label className="text-xs font-medium text-muted-foreground">
         {spec.label}
       </label>
       <button
         role="switch"
         aria-checked={value}
         onClick={() => onChange(!value)}
-        className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full transition-colors"
-        style={{
-          backgroundColor: value ? 'var(--color-primary)' : 'var(--color-input)',
-        }}
+        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full transition-colors ${
+          value ? 'bg-primary' : 'bg-input'
+        }`}
       >
         <span
-          className="pointer-events-none block h-5 w-5 rounded-full shadow-lg ring-0 transition-transform"
+          className="pointer-events-none block h-5 w-5 rounded-full bg-background shadow-lg ring-0 transition-transform"
           style={{
-            backgroundColor: 'var(--color-background)',
             transform: value ? 'translateX(20px) translateY(2px)' : 'translateX(2px) translateY(2px)',
           }}
         />

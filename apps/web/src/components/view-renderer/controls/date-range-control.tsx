@@ -21,7 +21,7 @@ const PRESETS = [
 export function DateRangeControl({ spec, value, onChange }: DateRangeControlProps) {
   return (
     <div className="flex flex-col gap-1">
-      <label className="text-xs font-medium" style={{ color: 'var(--color-muted-foreground)' }}>
+      <label className="text-xs font-medium text-muted-foreground">
         {spec.label}
       </label>
       <div className="flex items-center gap-2">
@@ -31,14 +31,7 @@ export function DateRangeControl({ spec, value, onChange }: DateRangeControlProp
             const [from, to] = e.target.value.split('|');
             if (from && to) onChange({ from, to });
           }}
-          className="h-8 rounded-md px-2 text-sm"
-          style={{
-            borderWidth: '1px',
-            borderStyle: 'solid',
-            borderColor: 'var(--color-input)',
-            backgroundColor: 'transparent',
-            color: 'var(--color-foreground)',
-          }}
+          className="h-8 rounded-md border border-input bg-transparent px-2 text-sm text-foreground"
         >
           {PRESETS.map((p) => (
             <option key={p.label} value={`${p.from}|${p.to}`}>
@@ -54,28 +47,14 @@ export function DateRangeControl({ spec, value, onChange }: DateRangeControlProp
               type="date"
               value={value.from}
               onChange={(e) => onChange({ ...value, from: e.target.value })}
-              className="h-8 rounded-md px-2 text-sm"
-              style={{
-                borderWidth: '1px',
-                borderStyle: 'solid',
-                borderColor: 'var(--color-input)',
-                backgroundColor: 'transparent',
-                color: 'var(--color-foreground)',
-              }}
+              className="h-8 rounded-md border border-input bg-transparent px-2 text-sm text-foreground"
             />
-            <span style={{ color: 'var(--color-muted-foreground)' }}>to</span>
+            <span className="text-muted-foreground">to</span>
             <input
               type="date"
               value={value.to}
               onChange={(e) => onChange({ ...value, to: e.target.value })}
-              className="h-8 rounded-md px-2 text-sm"
-              style={{
-                borderWidth: '1px',
-                borderStyle: 'solid',
-                borderColor: 'var(--color-input)',
-                backgroundColor: 'transparent',
-                color: 'var(--color-foreground)',
-              }}
+              className="h-8 rounded-md border border-input bg-transparent px-2 text-sm text-foreground"
             />
           </div>
         )}
