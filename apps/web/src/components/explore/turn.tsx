@@ -14,6 +14,12 @@ interface TurnProps {
   /** Suggestion chips rendered at the bottom of the turn. Mock in this PR. */
   suggestions?: string[];
   onSuggestionClick?: (text: string) => void;
+  /**
+   * Label of the suggestion chip currently waiting on a send to land. When
+   * set and matching a chip on this turn, that chip renders a loader and
+   * disables its siblings.
+   */
+  activeSuggestion?: string | null;
 }
 
 /**
@@ -38,6 +44,7 @@ export function Turn({
   assistantMessage,
   suggestions = [],
   onSuggestionClick,
+  activeSuggestion,
 }: TurnProps) {
   // Prefer suggestions embedded in the assistant's parts[] (PR 7 will wire
   // these from the backend). Fall back to the explicit `suggestions` prop
@@ -69,7 +76,11 @@ export function Turn({
       )}
 
       {allSuggestions.length > 0 && onSuggestionClick && (
-        <SuggestionChips items={allSuggestions} onSelect={onSuggestionClick} />
+        <SuggestionChips
+          items={allSuggestions}
+          onSelect={onSuggestionClick}
+          activeLabel={activeSuggestion}
+        />
       )}
     </div>
   );

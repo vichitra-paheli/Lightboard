@@ -16,6 +16,9 @@ export function DataSourcesPageClient() {
   const [sources, setSources] = useState<DataSourceRecord[]>([]);
   const [browsingSourceId, setBrowsingSourceId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // ID of the source whose DELETE request is currently in flight — the list
+  // reads this to render an in-button loader on the matching confirm action.
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // Fetch data sources from API on mount
   useEffect(() => {
@@ -74,13 +77,17 @@ export function DataSourcesPageClient() {
   );
 
   const handleDelete = useCallback(async (id: string) => {
-    // Optimistic removal
-    setSources((prev) => prev.filter((s) => s.id !== id));
-
-    const res = await fetch(`/api/data-sources/${id}`, { method: 'DELETE' });
-    if (!res.ok) {
-      // Revert on failure — refetch
-      await fetchSources();
+    setDeletingId(id);
+    try {
+      const res = await fetch(`/api/data-sources/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        setSources((prev) => prev.filter((s) => s.id !== id));
+      } else {
+        // Refetch to surface the authoritative list.
+        await fetchSources();
+      }
+    } finally {
+      setDeletingId(null);
     }
   }, []);
 
@@ -155,6 +162,7 @@ export function DataSourcesPageClient() {
       onEdit={handleEdit}
       onDelete={handleDelete}
       onBrowseSchema={handleBrowseSchema}
+      deletingId={deletingId}
     />
   );
 }

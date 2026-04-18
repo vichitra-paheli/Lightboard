@@ -4,6 +4,8 @@ import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label } from '
 import { useTranslations } from 'next-intl';
 import { useEffect, useState } from 'react';
 
+import { LightboardLoader } from '../brand';
+
 /** AI model settings form — lets users configure their AI provider per-org. */
 export function AIModelSettings() {
   const t = useTranslations('settings.ai');
@@ -148,7 +150,10 @@ export function AIModelSettings() {
 
         {/* Save */}
         <Button onClick={handleSave} disabled={saving || !apiKey}>
-          {saving ? t('saving') : t('save')}
+          <span className="inline-flex items-center gap-2">
+            {saving && <LightboardLoader size={12} ariaLabel="" />}
+            <span>{saving ? t('saving') : t('save')}</span>
+          </span>
         </Button>
       </CardContent>
     </Card>
