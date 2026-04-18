@@ -10,7 +10,7 @@ import {
   type ViewSpec,
 } from '@lightboard/viz-core';
 import { useTranslations } from 'next-intl';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 // Register chart panel plugins on module load so legacy ViewSpec paths
 // continue to render charts for conversations that haven't migrated to the
@@ -34,10 +34,11 @@ import type { HtmlView } from '@/components/view-renderer';
 import { useUiStore } from '@/stores/ui-store';
 import type { ChatMessageData, ToolCallData, AgentIndicatorData } from './chat-message';
 import { Composer } from './composer';
+import { FilmstripButton } from './filmstrip-button';
+import { FilmstripPanel, type FilmstripItem } from './filmstrip-panel';
 import type { DataSourceOption } from './types';
 import { ExploreSidebar } from './sidebar/explore-sidebar';
 import { Thread } from './thread';
-import { ViewFilmstrip } from './view-filmstrip';
 import { parseSSE } from '@/lib/sse-parser';
 
 /**
@@ -46,10 +47,12 @@ import { parseSSE } from '@/lib/sse-parser';
  * Thread + Composer. Charts render inline in the thread inside each turn's
  * `InlineChartFrame`, not in a right panel.
  *
- * The legacy `ViewFilmstrip` is kept imported and rendered with `hidden`
- * so PR 6 can swap it for the right slide-out without a risky PR-4 revert
- * leaving a dangling import. The filmstrip still receives fresh
- * `viewHistory` so the PR 6 swap is a pure UI change.
+ * PR 6 replaces the legacy bottom-pinned `ViewFilmstrip` with a right
+ * slide-out `FilmstripPanel`. The panel is a secondary navigation surface
+ * on top of the inline-in-thread primary surface: click a card to scroll
+ * the thread to that view's turn. Open-state is local (not persisted)
+ * because a reopened Explore page should start fresh rather than restore
+ * a potentially-stale filmstrip position.
  */
 export function ExplorePageClient() {
   const t = useTranslations('explore');
@@ -58,6 +61,10 @@ export function ExplorePageClient() {
   const [selectedSource, setSelectedSource] = useState<string | null>(null);
   const [viewHistory, setViewHistory] = useState<HtmlView[]>([]);
   const [activeViewIndex, setActiveViewIndex] = useState(-1);
+  // Ephemeral per-session flag — deliberately not persisted across reloads.
+  // Restoring a stale panel-open state on a conversation that no longer has
+  // any views is more jarring than starting closed every time.
+  const [filmstripOpen, setFilmstripOpen] = useState(false);
   const [dataSources, setDataSources] = useState<DataSourceOption[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [schemaCuration, setSchemaCuration] = useState<{
@@ -650,6 +657,50 @@ export function ExplorePageClient() {
   // exposed on the data-source API; pass just the name for now.
   const activeSource = dataSources.find((s) => s.id === selectedSource) ?? null;
 
+  /**
+   * Map the linear `viewHistory` into filmstrip display items. Each entry
+   * keeps the original `HtmlView` so the thumbnail generator can read the
+   * embedded Chart.js `type` string; the id is derived from the assistant
+   * message that produced the view (falling back to a positional id when
+   * matching fails) so React keys stay stable across re-renders.
+   */
+  const filmstripItems = useMemo<FilmstripItem[]>(() => {
+    return viewHistory.map((view, i) => {
+      const owningMessage = messages.find(
+        (m) => m.role === 'assistant' && m.view === view,
+      );
+      return {
+        id: owningMessage?.id ?? `view-${i}`,
+        view,
+      };
+    });
+  }, [viewHistory, messages]);
+
+  /**
+   * Clicking a card in the filmstrip marks that view active and scrolls
+   * the thread to the turn that originally produced it. We locate the
+   * turn by matching on the assistant message's `view` reference —
+   * `viewHistory[i]` is a direct reference to the same object stored on
+   * the message, so `===` is sufficient and avoids a separate id lookup.
+   */
+  const handleFilmstripSelect = useCallback(
+    (index: number) => {
+      if (index < 0 || index >= viewHistory.length) return;
+      setActiveViewIndex(index);
+      const target = viewHistory[index];
+      const owningMessage = messages.find(
+        (m) => m.role === 'assistant' && m.view === target,
+      );
+      if (owningMessage?.id) {
+        const node = document.querySelector<HTMLElement>(
+          `[data-message-id="${owningMessage.id}"]`,
+        );
+        node?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    },
+    [viewHistory, messages],
+  );
+
   return (
     <ChartThemeProvider mode="dark">
       <div className="flex h-full flex-col">
@@ -675,21 +726,22 @@ export function ExplorePageClient() {
           selectedSourceMeta={activeSource ? { name: activeSource.name } : null}
         />
 
-        {/* Legacy bottom-strip filmstrip kept mounted (hidden) so PR 6 can
-           swap it for the right slide-out without risking a PR 4 revert
-           leaving a dangling import. The component still receives fresh
-           `viewHistory` so PR 6 is a pure UI substitution. */}
-        <div hidden data-legacy-filmstrip>
-          <ViewFilmstrip
-            views={viewHistory}
-            activeIndex={
-              activeViewIndex === -1 ? viewHistory.length - 1 : activeViewIndex
-            }
-            onSelect={(i) => {
-              setActiveViewIndex(i);
-            }}
-          />
-        </div>
+        <FilmstripButton
+          open={filmstripOpen}
+          onToggle={() => setFilmstripOpen((v) => !v)}
+        />
+
+        <FilmstripPanel
+          open={filmstripOpen}
+          onClose={() => setFilmstripOpen(false)}
+          items={filmstripItems}
+          // Default the active card to the newest view when no specific card
+          // has been picked yet, mirroring the legacy filmstrip behaviour.
+          activeIndex={
+            activeViewIndex === -1 ? viewHistory.length - 1 : activeViewIndex
+          }
+          onSelect={handleFilmstripSelect}
+        />
       </div>
     </ChartThemeProvider>
   );

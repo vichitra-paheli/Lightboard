@@ -60,7 +60,13 @@
     "schemaEditorHint": "Edit the schema context that the AI agent uses for queries",
     "schemaSave": "Save",
     "schemaSaving": "Saving...",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "filmstripEyebrow": "Filmstrip",
+    "filmstripCount": "{count, plural, =0 {no generations} =1 {1 generation} other {# generations}}",
+    "filmstripEmpty": "No visualizations yet. Send a prompt to get started.",
+    "filmstripClose": "Close filmstrip",
+    "filmstripOpen": "Open filmstrip",
+    "filmstripPinned": "pinned"
   },
   "dataSources": {
     "title": "Data Sources",
