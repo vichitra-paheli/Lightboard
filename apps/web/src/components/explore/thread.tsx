@@ -85,9 +85,9 @@ interface ThreadProps {
  * - Empty state: a centered "Ask a question…" placeholder.
  *
  * Auto-scrolls to the bottom on every message update so streaming chunks
- * stay in view. The `data-legacy-filmstrip` attribute marks the position
- * where PR 6's right-slide filmstrip button will live; no element rendered
- * here yet.
+ * stay in view. PR 6 ships the filmstrip as a fixed-position right
+ * slide-out — it's rendered outside the thread by `ExplorePageClient`, so
+ * nothing lives in the thread's top chrome here.
  */
 export function Thread({
   messages,
@@ -119,11 +119,10 @@ export function Thread({
       ref={scrollRef}
       className="relative flex-1 overflow-y-auto"
       data-thread-root
-      data-legacy-filmstrip="pr6-target"
       style={{ scrollSnapType: 'y proximity' }}
     >
       <div
-        className="mx-auto"
+        className="relative mx-auto"
         style={{ maxWidth: 920, padding: '28px 48px 40px' }}
       >
         {hasMessages && (

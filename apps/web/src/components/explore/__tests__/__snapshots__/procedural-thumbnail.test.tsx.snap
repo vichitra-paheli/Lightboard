@@ -1,0 +1,188 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`<ProceduralThumbnail> structure > matches the inline snapshot for kind=bar 1`] = `
+<DocumentFragment>
+  <div
+    data-thumbnail-kind="bar"
+    style="height: 96px; width: 100%; background: var(--bg-3, #101013); border: 1px solid var(--line-3, #1E1E22); border-radius: 6px; box-sizing: border-box; padding: 10px; display: flex; flex-direction: column; gap: 3px; justify-content: center;"
+  >
+    <div
+      style="height: 4px; width: 70.21438669995405%; background: var(--ink-5, #3A3A42); border-radius: 1px;"
+    />
+    <div
+      style="height: 4px; width: 55.00000000000001%; background: var(--ink-5, #3A3A42); border-radius: 1px;"
+    />
+    <div
+      style="height: 4px; width: 48%; background: var(--ink-5, #3A3A42); border-radius: 1px;"
+    />
+    <div
+      style="height: 4px; width: 42%; background: var(--ink-5, #3A3A42); border-radius: 1px;"
+    />
+    <div
+      style="height: 4px; width: 38%; background: var(--ink-5, #3A3A42); border-radius: 1px;"
+    />
+    <div
+      style="height: 4px; width: 32%; background: var(--ink-5, #3A3A42); border-radius: 1px;"
+    />
+    <div
+      style="height: 4px; width: 28.000000000000004%; background: var(--ink-5, #3A3A42); border-radius: 1px;"
+    />
+    <div
+      style="height: 4px; width: 25%; background: var(--ink-5, #3A3A42); border-radius: 1px;"
+    />
+    <div
+      style="height: 4px; width: 22%; background: var(--ink-5, #3A3A42); border-radius: 1px;"
+    />
+  </div>
+</DocumentFragment>
+`;
+
+exports[`<ProceduralThumbnail> structure > matches the inline snapshot for kind=hist 1`] = `
+<DocumentFragment>
+  <div
+    data-thumbnail-kind="hist"
+    style="height: 96px; width: 100%; background: var(--bg-3, #101013); border: 1px solid var(--line-3, #1E1E22); border-radius: 6px; box-sizing: border-box; padding: 10px; display: flex; align-items: flex-end; gap: 3px;"
+  >
+    <div
+      style="flex: 1 1 0%; height: 19.56437940802425%; background: rgb(176, 140, 168); opacity: 0.75; border-radius: 1px 1px 0 0;"
+    />
+    <div
+      style="flex: 1 1 0%; height: 38.93562878482044%; background: rgb(176, 140, 168); opacity: 0.75; border-radius: 1px 1px 0 0;"
+    />
+    <div
+      style="flex: 1 1 0%; height: 58.23822443932295%; background: rgb(176, 140, 168); opacity: 0.75; border-radius: 1px 1px 0 0;"
+    />
+    <div
+      style="flex: 1 1 0%; height: 85.45395588036627%; background: rgb(176, 140, 168); opacity: 0.75; border-radius: 1px 1px 0 0;"
+    />
+    <div
+      style="flex: 1 1 0%; height: 55.230776494368904%; background: rgb(176, 140, 168); opacity: 0.75; border-radius: 1px 1px 0 0;"
+    />
+    <div
+      style="flex: 1 1 0%; height: 41.04931140318513%; background: rgb(176, 140, 168); opacity: 0.75; border-radius: 1px 1px 0 0;"
+    />
+    <div
+      style="flex: 1 1 0%; height: 22.46647518500686%; background: rgb(176, 140, 168); opacity: 0.75; border-radius: 1px 1px 0 0;"
+    />
+    <div
+      style="flex: 1 1 0%; height: 23.01688476651907%; background: rgb(176, 140, 168); opacity: 0.75; border-radius: 1px 1px 0 0;"
+    />
+    <div
+      style="flex: 1 1 0%; height: 12.42829817906022%; background: rgb(176, 140, 168); opacity: 0.75; border-radius: 1px 1px 0 0;"
+    />
+  </div>
+</DocumentFragment>
+`;
+
+exports[`<ProceduralThumbnail> structure > matches the inline snapshot for kind=line 1`] = `
+<DocumentFragment>
+  <div
+    data-thumbnail-kind="line"
+    style="height: 96px; width: 100%; background: var(--bg-3, #101013); border: 1px solid var(--line-3, #1E1E22); border-radius: 6px; box-sizing: border-box;"
+  >
+    <svg
+      height="100%"
+      preserveAspectRatio="none"
+      viewBox="0 0 100 40"
+      width="100%"
+    >
+      <path
+        d="M0.00,17.41 L9.09,14.69 L18.18,14.54 L27.27,14.15 L36.36,14.13 L45.45,15.34 L54.55,14.02 L63.64,15.21 L72.73,17.39 L81.82,20.02 L90.91,19.80 L100.00,22.06 L100,40 L0,40 Z"
+        fill="#8AB4B8"
+        opacity="0.18"
+      />
+      <path
+        d="M0.00,17.41 L9.09,14.69 L18.18,14.54 L27.27,14.15 L36.36,14.13 L45.45,15.34 L54.55,14.02 L63.64,15.21 L72.73,17.39 L81.82,20.02 L90.91,19.80 L100.00,22.06"
+        fill="none"
+        stroke="#8AB4B8"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        stroke-width="1.2"
+        vector-effect="non-scaling-stroke"
+      />
+    </svg>
+  </div>
+</DocumentFragment>
+`;
+
+exports[`<ProceduralThumbnail> structure > matches the inline snapshot for kind=scatter 1`] = `
+<DocumentFragment>
+  <div
+    data-thumbnail-kind="scatter"
+    style="height: 96px; width: 100%; background: var(--bg-3, #101013); border: 1px solid var(--line-3, #1E1E22); border-radius: 6px; box-sizing: border-box; position: relative;"
+  >
+    <div
+      style="position: absolute; left: 29.623780243564397%; top: 40.562525966670364%; width: 3px; height: 3px; border-radius: 99px; background: rgb(138, 180, 184); opacity: 0.7;"
+    />
+    <div
+      style="position: absolute; left: 80.21897134603932%; top: 22.100901915691793%; width: 3px; height: 3px; border-radius: 99px; background: rgb(138, 180, 184); opacity: 0.7;"
+    />
+    <div
+      style="position: absolute; left: 70.38002470042557%; top: 10.598334583919495%; width: 3px; height: 3px; border-radius: 99px; background: rgb(138, 180, 184); opacity: 0.7;"
+    />
+    <div
+      style="position: absolute; left: 85.91235045110807%; top: 53.357282537035644%; width: 3px; height: 3px; border-radius: 99px; background: rgb(138, 180, 184); opacity: 0.7;"
+    />
+    <div
+      style="position: absolute; left: 31.569424823392183%; top: 65.647444461938%; width: 3px; height: 3px; border-radius: 99px; background: rgb(138, 180, 184); opacity: 0.7;"
+    />
+    <div
+      style="position: absolute; left: 26.903371878433973%; top: 60.66602620994672%; width: 3px; height: 3px; border-radius: 99px; background: rgb(138, 180, 184); opacity: 0.7;"
+    />
+    <div
+      style="position: absolute; left: 75.53371736779809%; top: 28.186086697969586%; width: 3px; height: 3px; border-radius: 99px; background: rgb(138, 180, 184); opacity: 0.7;"
+    />
+    <div
+      style="position: absolute; left: 47.80292330309749%; top: 64.72529029706493%; width: 3px; height: 3px; border-radius: 99px; background: rgb(138, 180, 184); opacity: 0.7;"
+    />
+    <div
+      style="position: absolute; left: 61.16515330504626%; top: 70.09885068750009%; width: 3px; height: 3px; border-radius: 99px; background: rgb(138, 180, 184); opacity: 0.7;"
+    />
+    <div
+      style="position: absolute; left: 35.89761008275673%; top: 24.112430044915527%; width: 3px; height: 3px; border-radius: 99px; background: rgb(138, 180, 184); opacity: 0.7;"
+    />
+    <div
+      style="position: absolute; left: 62.06719245528802%; top: 31.295027835294604%; width: 3px; height: 3px; border-radius: 99px; background: rgb(138, 180, 184); opacity: 0.7;"
+    />
+    <div
+      style="position: absolute; left: 51.54169981600717%; top: 29.652130156755447%; width: 3px; height: 3px; border-radius: 99px; background: rgb(138, 180, 184); opacity: 0.7;"
+    />
+    <div
+      style="position: absolute; left: 77.21028198488057%; top: 75.72632527444512%; width: 3px; height: 3px; border-radius: 99px; background: rgb(138, 180, 184); opacity: 0.7;"
+    />
+    <div
+      style="position: absolute; left: 65.85724802687764%; top: 42.717374654021114%; width: 3px; height: 3px; border-radius: 99px; background: rgb(138, 180, 184); opacity: 0.7;"
+    />
+    <div
+      style="position: absolute; left: 42.769398691598326%; top: 38.38301968527958%; width: 3px; height: 3px; border-radius: 99px; background: rgb(138, 180, 184); opacity: 0.7;"
+    />
+    <div
+      style="position: absolute; left: 60.08434865390882%; top: 24.274101972114295%; width: 3px; height: 3px; border-radius: 99px; background: rgb(138, 180, 184); opacity: 0.7;"
+    />
+    <div
+      style="position: absolute; left: 61.57310011330992%; top: 16.356591028161347%; width: 3px; height: 3px; border-radius: 99px; background: rgb(138, 180, 184); opacity: 0.7;"
+    />
+    <div
+      style="position: absolute; left: 38.99872488807887%; top: 24.167723066639155%; width: 3px; height: 3px; border-radius: 99px; background: rgb(138, 180, 184); opacity: 0.7;"
+    />
+    <div
+      style="position: absolute; left: 81.71849849633873%; top: 55.59063128894195%; width: 3px; height: 3px; border-radius: 99px; background: rgb(138, 180, 184); opacity: 0.7;"
+    />
+    <div
+      style="position: absolute; left: 25.198890389874578%; top: 42.31525422073901%; width: 3px; height: 3px; border-radius: 99px; background: rgb(138, 180, 184); opacity: 0.7;"
+    />
+    <div
+      style="position: absolute; left: 85.63141298713163%; top: 28.877801455091685%; width: 3px; height: 3px; border-radius: 99px; background: rgb(138, 180, 184); opacity: 0.7;"
+    />
+    <div
+      style="position: absolute; left: 43.83047412382439%; top: 46.03878592373803%; width: 3px; height: 3px; border-radius: 99px; background: rgb(138, 180, 184); opacity: 0.7;"
+    />
+    <div
+      style="position: absolute; left: 17.414026556070894%; top: 58.61553298076615%; width: 3px; height: 3px; border-radius: 99px; background: rgb(138, 180, 184); opacity: 0.7;"
+    />
+    <div
+      style="position: absolute; left: 69.94729166151956%; top: 43.548223986290395%; width: 3px; height: 3px; border-radius: 99px; background: rgb(138, 180, 184); opacity: 0.7;"
+    />
+  </div>
+</DocumentFragment>
+`;

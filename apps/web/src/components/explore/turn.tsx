@@ -41,7 +41,14 @@ export function Turn({
   const view = assistantMessage?.view;
 
   return (
-    <div className="flex flex-col gap-5">
+    <div
+      className="flex flex-col gap-5"
+      // Used by the filmstrip slide-out to scroll a picked card's turn into
+      // view. Tagged with the assistant message id because the filmstrip
+      // entries are keyed off the assistant message that produced the view.
+      data-message-id={assistantMessage?.id ?? userMessage.id}
+      data-turn-root
+    >
       {/* 1. User prompt */}
       <UserMessage content={userMessage.content} />
 
