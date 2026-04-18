@@ -1,11 +1,9 @@
 'use client';
 
-import { AgentMessage } from './agent-message';
-import { AgentTracePlaceholder } from './agent-trace-placeholder';
-import { InlineChartFrame } from './inline-chart-frame';
+import { AssistantStream } from './assistant-stream';
 import { SuggestionChips } from './suggestion-chips';
 import { UserMessage } from './user-message';
-import type { ChatMessageData } from './chat-message';
+import { getFirstText, type ChatMessageData } from './chat-message';
 
 /**
  * Props for {@link Turn}.
@@ -13,24 +11,27 @@ import type { ChatMessageData } from './chat-message';
 interface TurnProps {
   userMessage: ChatMessageData;
   assistantMessage?: ChatMessageData;
-  /** Suggestion chips rendered at the bottom of the turn. Empty in this PR. */
+  /** Suggestion chips rendered at the bottom of the turn. Mock in this PR. */
   suggestions?: string[];
   onSuggestionClick?: (text: string) => void;
 }
 
 /**
- * One conversational turn — a user prompt plus the assistant's response,
- * rendered in the new editorial order:
+ * One conversational turn — a user prompt plus the assistant's response.
  *
- *   UserMessage → AgentTracePlaceholder → InlineChartFrame? → AgentMessage → SuggestionChips?
+ * Under the PR 5 parts[] model the turn layout is:
  *
- * The trace sits **above** the agent's text. This is the interim ordering
- * fix shipped in PR 4. Even though the legacy `ChatMessageData` model
- * still stores `content` + `toolCalls` as parallel arrays (which loses the
- * temporal interleaving inside a single message), moving the trace card
- * above the text at the turn level gets the top-level ordering right. The
- * remaining interleaving bug — text that belongs *between* two tool calls
- * — is only fully fixed by PR 5's `parts[]` migration.
+ *   UserMessage → AssistantStream(parts) → SuggestionChips?
+ *
+ * AssistantStream walks `assistantMessage.parts` in order and emits one
+ * block per part, clustering consecutive tool/agent-delegation rows. The
+ * parts array itself carries the temporal ordering produced by the SSE
+ * reducer, so interleaved text/tool/chart sequences render in exactly
+ * the order the agent produced them.
+ *
+ * Suggestions are extracted from the assistant's parts[] (when a
+ * `{ kind: 'suggestions' }` part exists) or from the legacy `suggestions`
+ * prop, and render after the stream.
  */
 export function Turn({
   userMessage,
@@ -38,45 +39,30 @@ export function Turn({
   suggestions = [],
   onSuggestionClick,
 }: TurnProps) {
-  const view = assistantMessage?.view;
+  // Prefer suggestions embedded in the assistant's parts[] (PR 7 will wire
+  // these from the backend). Fall back to the explicit `suggestions` prop
+  // so tests and hand-rolled callers still work.
+  const partSuggestions =
+    assistantMessage?.parts.flatMap((p) =>
+      p.kind === 'suggestions' ? p.items : [],
+    ) ?? [];
+  const allSuggestions =
+    partSuggestions.length > 0 ? partSuggestions : suggestions;
 
   return (
     <div className="flex flex-col gap-5">
       {/* 1. User prompt */}
-      <UserMessage content={userMessage.content} />
+      <UserMessage content={getFirstText(userMessage)} />
 
       {assistantMessage && (
-        <>
-          {/* 2. Trace card (tools, delegations, thinking) — now above the text */}
-          <AgentTracePlaceholder
-            thinking={assistantMessage.thinking}
-            toolCalls={assistantMessage.toolCalls}
-            agentDelegations={assistantMessage.agentDelegations}
-            isStreaming={assistantMessage.isStreaming}
-          />
+        <AssistantStream
+          parts={assistantMessage.parts}
+          isStreaming={assistantMessage.isStreaming}
+        />
+      )}
 
-          {/* 3. Chart, if this turn produced one */}
-          {view && (
-            <InlineChartFrame
-              view={view}
-              data={assistantMessage.viewData ?? null}
-              isLoading={assistantMessage.isStreaming}
-            />
-          )}
-
-          {/* 4. Agent text (markdown, with blinking cursor while streaming) */}
-          {(assistantMessage.content || assistantMessage.isStreaming) && (
-            <AgentMessage
-              content={assistantMessage.content}
-              isStreaming={assistantMessage.isStreaming}
-            />
-          )}
-
-          {/* 5. Follow-up suggestion chips — PR 7 populates real items */}
-          {suggestions.length > 0 && onSuggestionClick && (
-            <SuggestionChips items={suggestions} onClick={onSuggestionClick} />
-          )}
-        </>
+      {allSuggestions.length > 0 && onSuggestionClick && (
+        <SuggestionChips items={allSuggestions} onClick={onSuggestionClick} />
       )}
     </div>
   );

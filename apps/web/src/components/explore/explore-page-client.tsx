@@ -10,7 +10,7 @@ import {
   type ViewSpec,
 } from '@lightboard/viz-core';
 import { useTranslations } from 'next-intl';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 // Register chart panel plugins on module load so legacy ViewSpec paths
 // continue to render charts for conversations that haven't migrated to the
@@ -32,8 +32,9 @@ if (!defaultPanelRegistry.has('bar-chart')) {
 
 import type { HtmlView } from '@/components/view-renderer';
 import { useUiStore } from '@/stores/ui-store';
-import type { ChatMessageData, ToolCallData, AgentIndicatorData } from './chat-message';
+import type { ChatMessageData, MessagePart } from './chat-message';
 import { Composer } from './composer';
+import { createReducer, parseSSEJson, type Reducer } from './sse-reducer';
 import type { DataSourceOption } from './types';
 import { ExploreSidebar } from './sidebar/explore-sidebar';
 import { Thread } from './thread';
@@ -46,17 +47,21 @@ import { parseSSE } from '@/lib/sse-parser';
  * Thread + Composer. Charts render inline in the thread inside each turn's
  * `InlineChartFrame`, not in a right panel.
  *
+ * Under PR 5, SSE events feed an ordered `parts[]` via the pure reducer in
+ * `sse-reducer.ts`. The reducer preserves the temporal interleaving of
+ * text / tool calls / charts / delegations so the trace renders in the
+ * exact sequence the agent produced events.
+ *
  * The legacy `ViewFilmstrip` is kept imported and rendered with `hidden`
- * so PR 6 can swap it for the right slide-out without a risky PR-4 revert
+ * so PR 6 can swap it for the right slide-out without a risky revert
  * leaving a dangling import. The filmstrip still receives fresh
- * `viewHistory` so the PR 6 swap is a pure UI change.
+ * `viewHistory` derived from the messages' view parts.
  */
 export function ExplorePageClient() {
   const t = useTranslations('explore');
   const [messages, setMessages] = useState<ChatMessageData[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [selectedSource, setSelectedSource] = useState<string | null>(null);
-  const [viewHistory, setViewHistory] = useState<HtmlView[]>([]);
   const [activeViewIndex, setActiveViewIndex] = useState(-1);
   const [dataSources, setDataSources] = useState<DataSourceOption[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
@@ -66,7 +71,30 @@ export function ExplorePageClient() {
   } | null>(null);
   const schemaGenerationTriggered = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+  // The active reducer instance for the in-flight assistant message. Held
+  // in a ref so `handleStop` can call `.abort()` against the same stateful
+  // context the stream is accumulating into.
+  const activeReducerRef = useRef<Reducer | null>(null);
   const setSidebarSlot = useUiStore((s) => s.setSidebarSlot);
+
+  /**
+   * Derived view history — scans every assistant message's parts[] for
+   * `{ kind: 'view' }` entries and filters down to HtmlView (the only
+   * kind the bottom-strip filmstrip understands). The filmstrip stays
+   * imported (hidden) through PR 6 so a PR revert doesn't break the build.
+   */
+  const viewHistory = useMemo<HtmlView[]>(() => {
+    const out: HtmlView[] = [];
+    for (const m of messages) {
+      if (m.role !== 'assistant') continue;
+      for (const p of m.parts) {
+        if (p.kind === 'view' && 'html' in p.view) {
+          out.push(p.view);
+        }
+      }
+    }
+    return out;
+  }, [messages]);
 
   /**
    * Fetch data sources on mount. Kept as a one-shot `fetch` so the Explore
@@ -137,10 +165,11 @@ export function ExplorePageClient() {
     }
     if (schemaGenerationTriggered.current) return;
     const source = dataSources.find((s) => s.id === selectedSource);
-    // Suppress the callout if the most-recent assistant message already
-    // produced a view — showing it would flash a setup CTA on top of the
-    // user's results.
-    const hasView = messages.some((m) => m.role === 'assistant' && m.view);
+    // Suppress the callout if any assistant message already produced a
+    // view — the user's results shouldn't be obscured by a setup CTA.
+    const hasView = messages.some(
+      (m) => m.role === 'assistant' && m.parts.some((p) => p.kind === 'view'),
+    );
     if (source && !source.hasSchemaDoc && !hasView) {
       setSchemaCuration({ phase: 'callout', markdown: '' });
     } else {
@@ -174,255 +203,168 @@ export function ExplorePageClient() {
   );
 
   /**
-   * Consumes an SSE stream and updates messages progressively.
-   * Attaches any `view_created` output directly onto the assistant message
-   * so `<Turn>` can render it inline in the thread.
+   * Apply an SSE event (already parsed and typed) to the assistant
+   * message's parts[] via the stateful reducer. Replaces the legacy
+   * inline switch statement that mutated fields like `content` and
+   * `toolCalls[]` directly.
+   */
+  const applyEvent = useCallback(
+    (
+      assistantMsgId: string,
+      apply: (prev: MessagePart[]) => MessagePart[],
+    ) => {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantMsgId ? { ...m, parts: apply(m.parts) } : m,
+        ),
+      );
+    },
+    [],
+  );
+
+  /**
+   * Consume an SSE stream from the agent and feed events through the
+   * ordered-parts reducer. Kicks off legacy ViewSpec queries if a view
+   * lands without prefetched rows — those stay out of the reducer since
+   * they're an out-of-band data fetch, not a stream event.
    */
   const consumeSSEStream = useCallback(
-    async (response: Response, assistantMsgId: string) => {
-      // Track the last successful query result from run_sql or execute_query
-      // — used as a data-rows fallback for legacy ViewSpec paths.
-      let lastQueryRows: Record<string, unknown>[] | null = null;
-
+    async (response: Response, assistantMsgId: string, reducer: Reducer) => {
       for await (const sseEvent of parseSSE(response)) {
-        try {
-          const data = JSON.parse(sseEvent.data);
-
-          switch (sseEvent.event) {
-            case 'thinking':
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantMsgId
-                    ? { ...m, thinking: (m.thinking ?? '') + (data.text ?? '') }
-                    : m,
-                ),
-              );
-              break;
-
-            case 'text':
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantMsgId
-                    ? { ...m, content: m.content + (data.text ?? '') }
-                    : m,
-                ),
-              );
-              break;
-
-            case 'status':
-              if (data.text) {
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === assistantMsgId ? { ...m, content: data.text } : m,
-                  ),
-                );
-              }
-              break;
-
-            case 'tool_start': {
-              const newToolCall: ToolCallData = {
-                name: data.name,
-                status: 'running' as const,
-                ...(data.input ? { input: data.input } : {}),
-              };
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantMsgId
-                    ? { ...m, toolCalls: [...(m.toolCalls ?? []), newToolCall] }
-                    : m,
-                ),
-              );
-              break;
+        // Schema curation is its own UI flow, not a chat part — handle it
+        // before falling into the reducer.
+        if (sseEvent.event === 'schema_proposed') {
+          try {
+            const data = JSON.parse(sseEvent.data);
+            if (data.document) {
+              setSchemaCuration({
+                phase: 'editing',
+                markdown: data.document,
+              });
             }
-
-            case 'tool_end':
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantMsgId
-                    ? {
-                        ...m,
-                        toolCalls: m.toolCalls?.map((tc) =>
-                          tc.name === data.name && tc.status === 'running'
-                            ? {
-                                ...tc,
-                                status: data.isError
-                                  ? ('error' as const)
-                                  : ('done' as const),
-                                ...(data.result !== undefined
-                                  ? { result: String(data.result) }
-                                  : {}),
-                                ...(data.durationMs !== undefined
-                                  ? { durationMs: data.durationMs }
-                                  : {}),
-                              }
-                            : tc,
-                        ),
-                      }
-                    : m,
-                ),
-              );
-              if (
-                !data.isError &&
-                (data.name === 'run_sql' || data.name === 'execute_query')
-              ) {
-                try {
-                  const parsed = JSON.parse(data.result);
-                  if (parsed.rows) {
-                    lastQueryRows = parsed.rows;
-                  }
-                } catch {
-                  /* ignore parse errors */
-                }
-              }
-              break;
-
-            case 'agent_start': {
-              const newDelegation: AgentIndicatorData = {
-                agent: data.agent,
-                task: data.task,
-                status: 'running' as const,
-              };
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantMsgId
-                    ? {
-                        ...m,
-                        agentDelegations: [
-                          ...(m.agentDelegations ?? []),
-                          newDelegation,
-                        ],
-                      }
-                    : m,
-                ),
-              );
-              break;
-            }
-
-            case 'agent_end':
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantMsgId
-                    ? {
-                        ...m,
-                        agentDelegations: m.agentDelegations?.map((d) =>
-                          d.agent === data.agent && d.status === 'running'
-                            ? {
-                                ...d,
-                                status: 'done' as const,
-                                ...(data.summary ? { summary: data.summary } : {}),
-                              }
-                            : d,
-                        ),
-                      }
-                    : m,
-                ),
-              );
-              break;
-
-            case 'view_created':
-              if (data.viewSpec) {
-                // Attach the view onto this turn's assistant message so
-                // <Turn> renders it inline. `viewData` is only populated for
-                // legacy ViewSpec paths; HtmlView embeds its own data.
-                const viewSpec = data.viewSpec as ViewSpec | HtmlView;
-                const isHtml = 'html' in viewSpec;
-                const viewData = isHtml
-                  ? null
-                  : data.queryResult?.rows ?? lastQueryRows ?? null;
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === assistantMsgId
-                      ? { ...m, view: viewSpec, viewData }
-                      : m,
-                  ),
-                );
-
-                if (isHtml) {
-                  // Top-level view history is still maintained so PR 6 can
-                  // swap the current bottom-strip filmstrip for the new
-                  // right slide-out without having to rethread this state.
-                  setViewHistory((prev) => [...prev, viewSpec as HtmlView]);
-                  setActiveViewIndex(-1);
-                } else if (!viewData) {
-                  // Legacy ViewSpec path with no rows yet — kick off the
-                  // query and splice the result onto the message when it
-                  // comes back.
-                  const query = (viewSpec as ViewSpec).query;
-                  const sourceId = query?.source;
-                  if (sourceId) {
-                    fetch(`/api/data-sources/${sourceId}/query`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ queryIR: query }),
-                    })
-                      .then((r) => (r.ok ? r.json() : null))
-                      .then((result) => {
-                        if (result?.rows) {
-                          setMessages((prev) =>
-                            prev.map((m) =>
-                              m.id === assistantMsgId
-                                ? { ...m, viewData: result.rows }
-                                : m,
-                            ),
-                          );
-                        }
-                      })
-                      .catch(() => {
-                        // Query execution failed — the view block will keep
-                        // showing its loading state until the stream closes.
-                      });
-                  }
-                }
-              }
-              break;
-
-            case 'schema_proposed':
-              if (data.document) {
-                setSchemaCuration({ phase: 'editing', markdown: data.document });
-              }
-              break;
-
-            case 'done':
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantMsgId ? { ...m, isStreaming: false } : m,
-                ),
-              );
-              setIsStreaming(false);
-              if (data.conversationId) {
-                setConversationId(data.conversationId);
-              }
-              break;
-
-            case 'error':
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantMsgId
-                    ? {
-                        ...m,
-                        content: m.content
-                          ? `${m.content}\n\nError: ${data.error}`
-                          : data.error,
-                        isStreaming: false,
-                      }
-                    : m,
-                ),
-              );
-              break;
+          } catch {
+            /* ignore */
           }
-        } catch {
-          // Skip malformed SSE events
+          continue;
         }
+
+        if (sseEvent.event === 'error') {
+          try {
+            const data = JSON.parse(sseEvent.data);
+            applyEvent(assistantMsgId, (prev) =>
+              reducer.apply({ type: 'text', text: `\n\nError: ${data.error}` }, prev),
+            );
+            setMessages((m) =>
+              m.map((msg) =>
+                msg.id === assistantMsgId
+                  ? { ...msg, isStreaming: false }
+                  : msg,
+              ),
+            );
+          } catch {
+            /* ignore */
+          }
+          continue;
+        }
+
+        if (sseEvent.event === 'done') {
+          try {
+            const data = JSON.parse(sseEvent.data);
+            if (data.conversationId) {
+              setConversationId(data.conversationId);
+            }
+          } catch {
+            /* ignore */
+          }
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId ? { ...m, isStreaming: false } : m,
+            ),
+          );
+          setIsStreaming(false);
+          continue;
+        }
+
+        const parsed = parseSSEJson(sseEvent.event, sseEvent.data);
+        if (!parsed) continue;
+
+        // For legacy ViewSpec (no html field), kick off the rows query
+        // after the reducer has pushed the view part. The reducer will
+        // attach `data: lastQueryRows ?? null` — if null, fire the fetch
+        // and splice the rows into the view part when they arrive.
+        if (parsed.type === 'view_created') {
+          applyEvent(assistantMsgId, (prev) => reducer.apply(parsed, prev));
+          const viewSpec = parsed.viewSpec;
+          const isHtml = 'html' in viewSpec;
+          if (!isHtml) {
+            const query = (viewSpec as ViewSpec).query;
+            const sourceId = query?.source;
+            // If the event already carried rows, the reducer attached them —
+            // nothing to do. Otherwise, fire a one-shot query.
+            if (sourceId && !parsed.queryResult?.rows) {
+              fetch(`/api/data-sources/${sourceId}/query`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ queryIR: query }),
+              })
+                .then((r) => (r.ok ? r.json() : null))
+                .then((result) => {
+                  if (result?.rows) {
+                    // Patch the latest view part's data. We can't re-run
+                    // the reducer for this since it's an out-of-band
+                    // delivery — splice directly.
+                    setMessages((prev) =>
+                      prev.map((m) => {
+                        if (m.id !== assistantMsgId) return m;
+                        const idx = [...m.parts]
+                          .reverse()
+                          .findIndex((p) => p.kind === 'view');
+                        if (idx === -1) return m;
+                        const actualIdx = m.parts.length - 1 - idx;
+                        const existing = m.parts[actualIdx]!;
+                        if (existing.kind !== 'view') return m;
+                        const updated: MessagePart = {
+                          ...existing,
+                          data: result.rows,
+                        };
+                        return {
+                          ...m,
+                          parts: [
+                            ...m.parts.slice(0, actualIdx),
+                            updated,
+                            ...m.parts.slice(actualIdx + 1),
+                          ],
+                        };
+                      }),
+                    );
+                  }
+                })
+                .catch(() => {
+                  // Query failed — the view card will stay in its empty state.
+                });
+            }
+          }
+          // HtmlView path: also maintain the hidden filmstrip's active
+          // index. A brand-new view lands at the end of viewHistory, so
+          // reset the cursor to default (derived end-of-list) behavior.
+          if (isHtml) {
+            setActiveViewIndex(-1);
+          }
+          continue;
+        }
+
+        applyEvent(assistantMsgId, (prev) => reducer.apply(parsed, prev));
       }
 
-      // Ensure streaming flag is cleared even if no done event received
+      // Safety net: if the stream ended without an explicit `done` event,
+      // clear the streaming flag so the cursor stops blinking.
       setMessages((prev) =>
         prev.map((m) =>
           m.id === assistantMsgId ? { ...m, isStreaming: false } : m,
         ),
       );
     },
-    [],
+    [applyEvent],
   );
 
   const handleSend = useCallback(
@@ -434,7 +376,7 @@ export function ExplorePageClient() {
       const userMsg: ChatMessageData = {
         id: `msg_${Date.now()}`,
         role: 'user',
-        content: message,
+        parts: [{ kind: 'text', text: message }],
       };
       setMessages((prev) => [...prev, userMsg]);
       setIsStreaming(true);
@@ -446,12 +388,13 @@ export function ExplorePageClient() {
         {
           id: assistantMsgId,
           role: 'assistant',
-          content: '',
-          toolCalls: [],
-          agentDelegations: [],
+          parts: [],
           isStreaming: true,
         },
       ]);
+
+      const reducer = createReducer();
+      activeReducerRef.current = reducer;
 
       const controller = new AbortController();
       abortControllerRef.current = controller;
@@ -481,54 +424,64 @@ export function ExplorePageClient() {
         const contentType = response.headers.get('Content-Type') ?? '';
 
         if (contentType.includes('text/event-stream')) {
-          await consumeSSEStream(response, assistantMsgId);
+          await consumeSSEStream(response, assistantMsgId, reducer);
         } else {
-          // Fallback JSON mode — some providers don't stream.
+          // Fallback JSON mode — some providers don't stream. Push a
+          // synthetic series of events through the reducer so the final
+          // parts[] matches what a streaming response would have produced.
           const result = await response.json();
 
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantMsgId
-                ? {
-                    ...m,
-                    content: result.text ?? t('noResponse'),
-                    toolCalls: result.toolCalls?.map(
-                      (tc: { name: string; status?: string }) => ({
-                        name: tc.name,
-                        status: (tc.status as 'done' | 'error') ?? 'done',
-                      }),
-                    ),
-                    isStreaming: false,
-                  }
-                : m,
-            ),
-          );
+          if (typeof result.text === 'string' && result.text.length > 0) {
+            applyEvent(assistantMsgId, (prev) =>
+              reducer.apply({ type: 'text', text: result.text }, prev),
+            );
+          }
 
-          if (result.conversationId) {
-            setConversationId(result.conversationId);
+          if (Array.isArray(result.toolCalls)) {
+            for (const tc of result.toolCalls as Array<{
+              name: string;
+              status?: string;
+              result?: string;
+              durationMs?: number;
+            }>) {
+              applyEvent(assistantMsgId, (prev) =>
+                reducer.apply({ type: 'tool_start', name: tc.name }, prev),
+              );
+              applyEvent(assistantMsgId, (prev) =>
+                reducer.apply(
+                  {
+                    type: 'tool_end',
+                    name: tc.name,
+                    ...(tc.result !== undefined ? { result: tc.result } : {}),
+                    ...(tc.durationMs !== undefined
+                      ? { durationMs: tc.durationMs }
+                      : {}),
+                    isError: tc.status === 'error',
+                  },
+                  prev,
+                ),
+              );
+            }
           }
 
           if (result.viewSpec) {
-            const viewSpec = result.viewSpec as ViewSpec | HtmlView;
-            const isHtml = 'html' in viewSpec;
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantMsgId
-                  ? {
-                      ...m,
-                      view: viewSpec,
-                      viewData: isHtml
-                        ? null
-                        : (result.queryResult?.rows ?? null),
-                    }
-                  : m,
+            applyEvent(assistantMsgId, (prev) =>
+              reducer.apply(
+                {
+                  type: 'view_created',
+                  viewSpec: result.viewSpec,
+                  ...(result.queryResult
+                    ? { queryResult: result.queryResult }
+                    : {}),
+                },
+                prev,
               ),
             );
+            const isHtml = 'html' in result.viewSpec;
             if (isHtml) {
-              setViewHistory((prev) => [...prev, viewSpec as HtmlView]);
               setActiveViewIndex(-1);
             } else if (!result.queryResult?.rows) {
-              const query = (viewSpec as ViewSpec).query;
+              const query = (result.viewSpec as ViewSpec).query;
               const srcId = query?.source;
               if (srcId) {
                 fetch(`/api/data-sources/${srcId}/query`, {
@@ -540,11 +493,28 @@ export function ExplorePageClient() {
                   .then((qr) => {
                     if (qr?.rows) {
                       setMessages((prev) =>
-                        prev.map((m) =>
-                          m.id === assistantMsgId
-                            ? { ...m, viewData: qr.rows }
-                            : m,
-                        ),
+                        prev.map((m) => {
+                          if (m.id !== assistantMsgId) return m;
+                          const idx = [...m.parts]
+                            .reverse()
+                            .findIndex((p) => p.kind === 'view');
+                          if (idx === -1) return m;
+                          const actualIdx = m.parts.length - 1 - idx;
+                          const existing = m.parts[actualIdx]!;
+                          if (existing.kind !== 'view') return m;
+                          const updated: MessagePart = {
+                            ...existing,
+                            data: qr.rows,
+                          };
+                          return {
+                            ...m,
+                            parts: [
+                              ...m.parts.slice(0, actualIdx),
+                              updated,
+                              ...m.parts.slice(actualIdx + 1),
+                            ],
+                          };
+                        }),
                       );
                     }
                   })
@@ -552,6 +522,16 @@ export function ExplorePageClient() {
               }
             }
           }
+
+          if (result.conversationId) {
+            setConversationId(result.conversationId);
+          }
+
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId ? { ...m, isStreaming: false } : m,
+            ),
+          );
         }
       } catch (err) {
         if (err instanceof Error && err.name === 'AbortError') {
@@ -561,35 +541,43 @@ export function ExplorePageClient() {
             ),
           );
         } else {
+          const errMsg = err instanceof Error ? err.message : t('noResponse');
+          applyEvent(assistantMsgId, (prev) =>
+            reducer.apply({ type: 'text', text: errMsg }, prev),
+          );
           setMessages((prev) =>
             prev.map((m) =>
-              m.id === assistantMsgId
-                ? {
-                    ...m,
-                    content: err instanceof Error ? err.message : t('noResponse'),
-                    isStreaming: false,
-                  }
-                : m,
+              m.id === assistantMsgId ? { ...m, isStreaming: false } : m,
             ),
           );
         }
       } finally {
         setIsStreaming(false);
         abortControllerRef.current = null;
+        activeReducerRef.current = null;
       }
     },
-    [selectedSource, conversationId, t, consumeSSEStream],
+    [selectedSource, conversationId, t, consumeSSEStream, applyEvent],
   );
 
-  /** Stop the current agent stream. */
+  /**
+   * Stop the current agent stream. Flips any running tool_call /
+   * agent_delegation parts to `aborted` via the reducer's abort() so the
+   * UI doesn't leave a spinning dot stuck on the page.
+   */
   const handleStop = useCallback(() => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
     setIsStreaming(false);
+    const reducer = activeReducerRef.current;
     setMessages((prev) =>
-      prev.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m)),
+      prev.map((m) => {
+        if (!m.isStreaming) return m;
+        const nextParts = reducer ? reducer.abort(m.parts) : m.parts;
+        return { ...m, parts: nextParts, isStreaming: false };
+      }),
     );
   }, []);
 
@@ -620,7 +608,6 @@ export function ExplorePageClient() {
   const handleNewConversation = useCallback(() => {
     handleStop();
     setMessages([]);
-    setViewHistory([]);
     setActiveViewIndex(-1);
     setConversationId(null);
   }, [handleStop]);
@@ -678,7 +665,7 @@ export function ExplorePageClient() {
         {/* Legacy bottom-strip filmstrip kept mounted (hidden) so PR 6 can
            swap it for the right slide-out without risking a PR 4 revert
            leaving a dangling import. The component still receives fresh
-           `viewHistory` so PR 6 is a pure UI substitution. */}
+           `viewHistory` derived from the messages' view parts. */}
         <div hidden data-legacy-filmstrip>
           <ViewFilmstrip
             views={viewHistory}
