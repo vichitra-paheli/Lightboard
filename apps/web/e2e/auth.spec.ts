@@ -22,26 +22,43 @@ test.describe('auth flows', () => {
 
   test('login page renders correctly', async ({ page }) => {
     await page.goto('/login');
-    await expect(page.getByRole('heading', { name: 'Log in' })).toBeVisible();
-    await expect(page.getByLabel('Email')).toBeVisible();
-    await expect(page.getByLabel('Password')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Log in' })).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Create account' })).toBeVisible();
+    // Sigil replaces the former "Log in" heading — it's the identity on both
+    // auth pages now. The card drops in at 2200ms; auto-waiting on the
+    // visibility of the Username input keeps the assertion honest.
+    await expect(page.locator('svg[aria-label="Lightboard"]')).toBeVisible();
+    await expect(
+      page.getByText('The thinking surface for your data.'),
+    ).toBeVisible();
+    await expect(page.getByLabel('Username')).toBeVisible();
+    // `getByLabel('Password')` in strict mode is ambiguous — both the password
+    // input and the Show/Hide toggle carry the word "Password". Pin to the
+    // `textbox` role so the assertion matches the input unambiguously.
+    await expect(
+      page.getByRole('textbox', { name: 'Password' }),
+    ).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible();
+    await expect(
+      page.getByRole('link', { name: 'Create one' }),
+    ).toBeVisible();
   });
 
   test('register page renders correctly', async ({ page }) => {
     await page.goto('/register');
-    await expect(page.getByRole('heading', { name: 'Create account' })).toBeVisible();
+    await expect(page.locator('svg[aria-label="Lightboard"]')).toBeVisible();
     await expect(page.getByLabel('Organization name')).toBeVisible();
     await expect(page.getByLabel('Full name')).toBeVisible();
     await expect(page.getByLabel('Email')).toBeVisible();
-    await expect(page.getByLabel('Password')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Create account' })).toBeVisible();
+    await expect(
+      page.getByRole('textbox', { name: 'Password' }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Create account' }),
+    ).toBeVisible();
   });
 
   test('navigate between login and register', async ({ page }) => {
     await page.goto('/login');
-    await page.getByRole('link', { name: 'Create account' }).click();
+    await page.getByRole('link', { name: 'Create one' }).click();
     await expect(page).toHaveURL(/\/register/);
 
     await page.getByRole('link', { name: 'Log in' }).click();
@@ -110,9 +127,13 @@ test.describe('auth flows', () => {
 
   test('login with wrong password shows error', async ({ page }) => {
     await page.goto('/login');
-    await page.getByLabel('Email').pressSequentially(TEST_EMAIL);
-    await page.getByLabel('Password').pressSequentially('wrong-password');
-    await page.getByRole('button', { name: 'Log in' }).click();
+    // Wait for the card to drop in before typing (animation lands at 2200ms).
+    await expect(page.getByLabel('Username')).toBeVisible();
+    await page.getByLabel('Username').pressSequentially(TEST_EMAIL);
+    await page
+      .getByRole('textbox', { name: 'Password' })
+      .pressSequentially('wrong-password');
+    await page.getByRole('button', { name: 'Sign in' }).click();
 
     await expect(page.getByText('Invalid email or password')).toBeVisible();
     await expect(page).toHaveURL(/\/login/);
@@ -120,9 +141,12 @@ test.describe('auth flows', () => {
 
   test('login with valid credentials redirects to dashboard', async ({ page }) => {
     await page.goto('/login');
-    await page.getByLabel('Email').pressSequentially(TEST_EMAIL);
-    await page.getByLabel('Password').pressSequentially(TEST_PASSWORD);
-    await page.getByRole('button', { name: 'Log in' }).click();
+    await expect(page.getByLabel('Username')).toBeVisible();
+    await page.getByLabel('Username').pressSequentially(TEST_EMAIL);
+    await page
+      .getByRole('textbox', { name: 'Password' })
+      .pressSequentially(TEST_PASSWORD);
+    await page.getByRole('button', { name: 'Sign in' }).click();
 
     await expect(page).toHaveURL('/', { timeout: 15000 });
     await expect(page.getByText('Welcome to Lightboard')).toBeVisible();
