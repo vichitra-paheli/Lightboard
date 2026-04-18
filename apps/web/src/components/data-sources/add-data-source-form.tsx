@@ -79,14 +79,7 @@ export function AddDataSourceForm({ onSave, onCancel, onTestConnection }: AddDat
             id="ds-type"
             value={type}
             onChange={(e) => setType(e.target.value)}
-            className="flex h-10 w-full rounded-md px-3 py-2 text-sm"
-            style={{
-              borderWidth: '1px',
-              borderStyle: 'solid',
-              borderColor: 'var(--color-input)',
-              backgroundColor: 'transparent',
-              color: 'var(--color-foreground)',
-            }}
+            className="flex h-10 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm text-foreground"
           >
             {CONNECTOR_TYPES.map((ct) => (
               <option key={ct.value} value={ct.value}>{ct.label}</option>
@@ -125,8 +118,12 @@ export function AddDataSourceForm({ onSave, onCancel, onTestConnection }: AddDat
           <div
             className="rounded-md p-3 text-sm"
             style={{
-              backgroundColor: testResult.success ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
-              color: testResult.success ? '#22c55e' : '#ef4444',
+              // Tint the feedback with the matching semantic token so success
+              // reads as the warm-green narrate kind and failure as destructive.
+              backgroundColor: testResult.success
+                ? 'color-mix(in oklab, var(--kind-narrate) 14%, transparent)'
+                : 'color-mix(in oklab, var(--color-destructive) 14%, transparent)',
+              color: testResult.success ? 'var(--kind-narrate)' : 'var(--color-destructive)',
             }}
           >
             {testResult.success ? t('connected') : t('disconnected')}: {testResult.message}
@@ -136,8 +133,7 @@ export function AddDataSourceForm({ onSave, onCancel, onTestConnection }: AddDat
       <CardFooter className="flex justify-between">
         <button
           onClick={onCancel}
-          className="rounded-md px-4 py-2 text-sm"
-          style={{ borderWidth: '1px', borderStyle: 'solid', borderColor: 'var(--color-border)', color: 'var(--color-muted-foreground)' }}
+          className="rounded-md border border-border px-4 py-2 text-sm text-muted-foreground"
         >
           {t('cancel')}
         </button>
@@ -145,8 +141,7 @@ export function AddDataSourceForm({ onSave, onCancel, onTestConnection }: AddDat
           <button
             onClick={handleTest}
             disabled={testing || !host || !database}
-            className="rounded-md px-4 py-2 text-sm font-medium disabled:opacity-50"
-            style={{ borderWidth: '1px', borderStyle: 'solid', borderColor: 'var(--color-border)', color: 'var(--color-foreground)' }}
+            className="rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground disabled:opacity-50"
           >
             {testing ? '...' : t('testConnection')}
           </button>

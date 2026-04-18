@@ -64,7 +64,7 @@ export function AIModelSettings() {
     <Card className="max-w-lg">
       <CardHeader>
         <CardTitle>{t('title')}</CardTitle>
-        <p className="text-sm" style={{ color: 'var(--color-muted-foreground)' }}>
+        <p className="text-sm text-muted-foreground">
           {t('description')}
         </p>
       </CardHeader>
@@ -76,14 +76,7 @@ export function AIModelSettings() {
             id="ai-provider"
             value={providerType}
             onChange={(e) => setProviderType(e.target.value as 'claude' | 'openai-compatible')}
-            className="flex h-10 w-full rounded-md px-3 py-2 text-sm"
-            style={{
-              borderWidth: '1px',
-              borderStyle: 'solid',
-              borderColor: 'var(--color-input)',
-              backgroundColor: 'transparent',
-              color: 'var(--color-foreground)',
-            }}
+            className="flex h-10 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm text-foreground"
           >
             <option value="openai-compatible">{t('providerOpenAI')}</option>
             <option value="claude">{t('providerClaude')}</option>
@@ -137,8 +130,16 @@ export function AIModelSettings() {
           <div
             className="rounded-md p-3 text-sm"
             style={{
-              backgroundColor: feedback.type === 'success' ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
-              color: feedback.type === 'success' ? '#22c55e' : '#ef4444',
+              // Tint success with the warm-green narrate kind and error with
+              // the destructive token so feedback reads on-brand on dark.
+              backgroundColor:
+                feedback.type === 'success'
+                  ? 'color-mix(in oklab, var(--kind-narrate) 14%, transparent)'
+                  : 'color-mix(in oklab, var(--color-destructive) 14%, transparent)',
+              color:
+                feedback.type === 'success'
+                  ? 'var(--kind-narrate)'
+                  : 'var(--color-destructive)',
             }}
           >
             {feedback.message}
