@@ -1,0 +1,52 @@
+/*
+ * Lightboard animated sigil — stroke-draw typography.
+ *
+ * The SVG renders ten letter groups, each with two superimposed <path>s:
+ *   .halo   — 2.1px stroke at 0.35 opacity, reads as glow under the letter.
+ *   .stroke — 1.2px crisp stroke on top.
+ *
+ * Both paths share the same path length (50, set via SVG `pathLength`) and the
+ * same `strokeDasharray: 50`, so the `sigilDraw` keyframe (defined in
+ * globals.css) animates `stroke-dashoffset` from 50 → 0 for a left-to-right
+ * fill-in. Each letter group sets `--sigil-delay` inline for its staggered
+ * entry.
+ *
+ * When the user prefers reduced motion we skip the animation entirely and
+ * force `stroke-dashoffset: 0` so the wordmark appears instantly.
+ */
+
+.root {
+  display: block;
+  overflow: visible;
+}
+
+.letter {
+  /* Per-letter delay is set inline via style={{ '--sigil-delay': `${delay}ms` }} */
+}
+
+.halo,
+.stroke {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 50;
+  animation: sigilDraw var(--dur-sigil, 900ms) var(--ease-draw, cubic-bezier(0.6, 0.1, 0.2, 1)) both;
+  animation-delay: var(--sigil-delay, 0ms);
+}
+
+.halo {
+  stroke-width: 2.1;
+  opacity: 0.35;
+}
+
+.stroke {
+  stroke-width: 1.2;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .halo,
+  .stroke {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+}
