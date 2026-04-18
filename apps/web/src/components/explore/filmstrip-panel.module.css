@@ -12,7 +12,10 @@
 
 .panel {
   position: fixed;
-  top: 0;
+  /* Start below the 56px top bar so the panel header + close button remain
+   * visible. The top bar is z-20 and sticky; anchoring the panel at 56px
+   * lets the top bar sit cleanly above it without hiding our chrome. */
+  top: 56px;
   right: 0;
   bottom: 0;
   width: 320px;
