@@ -1,6 +1,8 @@
 'use client';
 
+import { useTranslations } from 'next-intl';
 import { useCallback, useEffect, useState } from 'react';
+import { LightboardLoader } from '../brand';
 import { AddDataSourceForm } from './add-data-source-form';
 import { DataSourceList, type DataSourceRecord } from './data-source-list';
 import { SchemaBrowser } from './schema-browser';
@@ -9,6 +11,7 @@ type View = 'list' | 'add' | 'schema';
 
 /** Client-side Data Sources management page with API persistence. */
 export function DataSourcesPageClient() {
+  const t = useTranslations('dataSources');
   const [view, setView] = useState<View>('list');
   const [sources, setSources] = useState<DataSourceRecord[]>([]);
   const [browsingSourceId, setBrowsingSourceId] = useState<string | null>(null);
@@ -116,8 +119,9 @@ export function DataSourcesPageClient() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-20">
-        <p className="text-sm text-muted-foreground">Loading...</p>
+      <div className="flex flex-col items-center justify-center gap-3 py-20">
+        <LightboardLoader size={48} />
+        <p className="text-sm text-muted-foreground">{t('loadingSources')}</p>
       </div>
     );
   }

@@ -2,6 +2,7 @@
 
 import { useTranslations } from 'next-intl';
 import { useState } from 'react';
+import { LightboardLoader } from '../brand';
 
 /** Column info for schema browser. */
 interface ColumnInfo {
@@ -55,9 +56,10 @@ export function SchemaBrowser({ tables, onClose, sourceName, loading }: SchemaBr
       </div>
 
       {loading ? (
-        <p className="animate-pulse text-sm text-muted-foreground">
-          Loading schema...
-        </p>
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <LightboardLoader size={14} />
+          <span>{t('loadingSchema')}</span>
+        </div>
       ) : tables.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           {t('noTables')}

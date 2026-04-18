@@ -1,6 +1,7 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
+import { LightboardLoader } from '../brand';
 
 /** Props for the SchemaCurationPanel component. */
 interface SchemaCurationPanelProps {
@@ -75,8 +76,10 @@ export function SchemaCurationPanel({
   if (phase === 'generating') {
     return (
       <div className="flex h-full items-center justify-center">
-        <div className="text-center">
-          <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-t-transparent" style={{ borderColor: 'var(--color-muted-foreground)', borderTopColor: 'transparent' }} />
+        <div className="flex flex-col items-center text-center">
+          <div className="mb-4">
+            <LightboardLoader size={48} />
+          </div>
           <p className="text-sm font-medium" style={{ color: 'var(--color-foreground)' }}>
             {t('schemaGenerating')}
           </p>

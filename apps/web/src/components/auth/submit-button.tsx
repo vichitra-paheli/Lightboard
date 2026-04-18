@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
-import { ArrowIcon, SpinnerIcon } from './field-icons';
+import { LightboardLoader } from '../brand';
+import { ArrowIcon } from './field-icons';
 import styles from './auth-card.module.css';
 
 /** Props for {@link SubmitButton}. */
@@ -37,7 +38,7 @@ export function SubmitButton({
     >
       {loading ? (
         <>
-          <SpinnerIcon className={styles.spinner} />
+          <LightboardLoader size={12} />
           {loadingLabel}
         </>
       ) : (

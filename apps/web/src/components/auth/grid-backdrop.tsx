@@ -1,27 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { SIGIL_PALETTE } from '../brand/sigil-palette';
 import styles from './grid-backdrop.module.css';
-
-/**
- * Palette for the streaking traces. These literal hex values mirror the
- * `--sigil-1..10` tokens in `globals.css`; they are duplicated here because
- * each trace needs its color baked into a `linear-gradient(...)` and a
- * `box-shadow` string at spawn time — a `var(--sigil-1)` inside those strings
- * would pin every trace to the same runtime value instead of capturing the
- * chosen one. If the sigil palette changes, update this array in lockstep.
- */
-const TRACE_COLORS = [
-  '#F4A261',
-  '#E76F51',
-  '#E9C46A',
-  '#D9A441',
-  '#8AB4B8',
-  '#5E8B95',
-  '#6A7BA2',
-  '#B08CA8',
-  '#D4846F',
-] as const;
 
 /** Grid pitch (one square edge, in CSS pixels). Matches the handoff. */
 const GRID_PITCH = 48;
@@ -146,7 +127,7 @@ function TraceField() {
     const spawn = (now: number) => {
       const id = idRef.current++;
       const horizontal = Math.random() > 0.5;
-      const color = TRACE_COLORS[Math.floor(Math.random() * TRACE_COLORS.length)]!;
+      const color = SIGIL_PALETTE[Math.floor(Math.random() * SIGIL_PALETTE.length)]!;
       const duration = 5000 + Math.random() * 3500;
       const reverse = Math.random() > 0.5;
 

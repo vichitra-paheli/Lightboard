@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useEffect, useState } from 'react';
+import { LightboardLoader } from '../brand';
 
 /** An HTML view produced by the agent — rendered in a sandboxed iframe. */
 export interface HtmlView {
@@ -66,7 +67,7 @@ export function HtmlViewRenderer({ view, isLoading }: HtmlViewRendererProps) {
       <div className="relative flex-1 overflow-hidden">
         {isLoading && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/50">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
+            <LightboardLoader size={48} />
           </div>
         )}
         <iframe

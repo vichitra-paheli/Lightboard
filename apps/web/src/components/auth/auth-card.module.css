@@ -205,10 +205,6 @@
   transform: translateX(2px);
 }
 
-.spinner {
-  animation: lb-auth-spin 0.9s linear infinite;
-}
-
 .btnGoogle {
   background: var(--bg-6);
   color: var(--ink-1);
@@ -266,12 +262,6 @@
   border-bottom-color: var(--line-5);
 }
 
-@keyframes lb-auth-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .btn,
   .btnPrimary,
@@ -281,9 +271,6 @@
   .labelAux,
   .finePrintLink {
     transition: none;
-  }
-  .spinner {
-    animation: none;
   }
   .btnPrimary:hover:not(:disabled) {
     transform: none;

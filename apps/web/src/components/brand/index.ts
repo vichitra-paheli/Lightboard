@@ -6,3 +6,8 @@
  */
 export { LightboardSigil, type LightboardSigilProps } from './lightboard-sigil';
 export { SigilLoader, type SigilLoaderProps } from './sigil-loader';
+export {
+  LightboardLoader,
+  type LightboardLoaderProps,
+} from './lightboard-loader';
+export { SIGIL_PALETTE, type SigilPaletteColor } from './sigil-palette';

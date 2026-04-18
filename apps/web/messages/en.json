@@ -94,7 +94,9 @@
     "schemaOf": "Schema: {name}",
     "close": "Close",
     "noTables": "No tables found.",
-    "columns": "columns"
+    "columns": "columns",
+    "loadingSchema": "Loading schema…",
+    "loadingSources": "Loading data sources…"
   },
   "views": {
     "title": "Views",
