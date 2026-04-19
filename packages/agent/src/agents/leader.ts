@@ -28,6 +28,18 @@ export type LeaderProviderMap = {
   insights: LLMProvider;
 };
 
+/**
+ * Per-role output-token ceiling. Keyed by role name, each value is the
+ * `maxTokens` that role's LLM call will pass in `ChatOptions.maxTokens`. When
+ * a role is missing from this map, the provider's stored default is used.
+ */
+export type LeaderMaxTokensMap = Partial<{
+  leader: number;
+  query: number;
+  view: number;
+  insights: number;
+}>;
+
 /** Configuration for creating a LeaderAgent. */
 export interface LeaderAgentConfig {
   /**
@@ -53,6 +65,12 @@ export interface LeaderAgentConfig {
   subAgentMaxRounds?: number;
   /** Grace timeout (ms) for draining in-flight tasks at turn end. */
   drainTimeoutMs?: number;
+  /**
+   * Per-role output-token ceilings. Threaded into each agent's LLM call so
+   * the user-configured `model_configs.max_tokens` is honored explicitly
+   * instead of relying on the provider's stored default.
+   */
+  maxTokensPerRole?: LeaderMaxTokensMap;
 }
 
 /** Maximum number of sample rows to include in summaries sent to the LLM. */
@@ -113,6 +131,7 @@ export class LeaderAgent {
   private maxToolRounds: number;
   private subAgentMaxRounds: number;
   private drainTimeoutMs: number;
+  private maxTokensPerRole: LeaderMaxTokensMap;
   /** Counter for auto-naming scratchpad tables. */
   private queryCounter = 0;
   /** Per-turn task pool for async dispatch. Reset at the start of each chat() call. */
@@ -137,6 +156,7 @@ export class LeaderAgent {
     this.maxToolRounds = config.maxToolRounds ?? 10;
     this.subAgentMaxRounds = config.subAgentMaxRounds ?? 5;
     this.drainTimeoutMs = config.drainTimeoutMs ?? DEFAULT_DRAIN_TIMEOUT_MS;
+    this.maxTokensPerRole = config.maxTokensPerRole ?? {};
   }
 
   /**
@@ -146,6 +166,15 @@ export class LeaderAgent {
    */
   get provider(): LLMProvider {
     return this.providers.leader;
+  }
+
+  /**
+   * Swap the tool context for subsequent turns. Used when callers wrap the
+   * context per-turn (e.g., with a turn-scoped conversation logger) but keep
+   * the LeaderAgent alive across turns via a cache.
+   */
+  setToolContext(ctx: ToolContext): void {
+    this.toolContext = ctx;
   }
 
   /**
@@ -182,7 +211,7 @@ export class LeaderAgent {
       const stream = this.providers.leader.chat(
         this.conversation.getMessages(),
         leaderTools,
-        { system: systemPrompt },
+        { system: systemPrompt, maxTokens: this.maxTokensPerRole.leader },
       );
 
       for await (const event of stream) {
@@ -511,6 +540,7 @@ export class LeaderAgent {
         provider: this.providers.query,
         toolRouter: queryRouter,
         maxToolRounds: this.subAgentMaxRounds,
+        maxTokens: this.maxTokensPerRole.query,
         onStatus,
       });
 
@@ -544,6 +574,7 @@ export class LeaderAgent {
         provider: this.providers.view,
         toolRouter: viewRouter,
         maxToolRounds: this.subAgentMaxRounds,
+        maxTokens: this.maxTokensPerRole.view,
         onStatus,
       });
 
@@ -571,6 +602,7 @@ export class LeaderAgent {
       provider: this.providers.insights,
       toolRouter: insightsRouter,
       maxToolRounds: this.subAgentMaxRounds,
+      maxTokens: this.maxTokensPerRole.insights,
       onStatus,
     });
 

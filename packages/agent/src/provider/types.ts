@@ -43,6 +43,29 @@ export interface ChatOptions {
   system?: string;
 }
 
+/**
+ * Structured reason for an LLM error. Helps callers render actionable messages
+ * instead of a generic "AI provider error" when the root cause is a knob the
+ * user can turn (e.g., `maxTokens` too small).
+ *
+ * - `output_tokens_exceeded`: the model produced a response at the `maxTokens`
+ *   ceiling — view output may be truncated.
+ * - `context_length_exceeded`: total input (messages + tools + system) is
+ *   larger than the model's context window.
+ * - `invalid_request`: provider rejected the request shape; usually a caller bug.
+ * - `auth`: API key missing or rejected.
+ * - `rate_limited`: 429 from the provider.
+ * - `server_error`: 5xx from the provider.
+ */
+export type LLMErrorReason =
+  | 'output_tokens_exceeded'
+  | 'context_length_exceeded'
+  | 'invalid_request'
+  | 'auth'
+  | 'rate_limited'
+  | 'server_error'
+  | 'unknown';
+
 /** Normalized error from any LLM provider. */
 export class LLMError extends Error {
   constructor(
@@ -50,6 +73,7 @@ export class LLMError extends Error {
     public readonly provider: string,
     public readonly statusCode?: number,
     public readonly retryable: boolean = false,
+    public readonly reason: LLMErrorReason = 'unknown',
   ) {
     super(message);
     this.name = 'LLMError';

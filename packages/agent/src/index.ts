@@ -6,6 +6,7 @@ export {
   LeaderAgent,
   type LeaderAgentConfig,
   type LeaderProviderMap,
+  type LeaderMaxTokensMap,
   type SubAgent,
   type SubAgentConfig,
   type SubAgentRole,
@@ -16,7 +17,9 @@ export { ConversationManager } from './conversation';
 export {
   ClaudeProvider,
   type ClaudeProviderConfig,
+  DEFAULT_MAX_OUTPUT_TOKENS,
   LLMError,
+  type LLMErrorReason,
   type LLMProvider,
   type Message,
   OpenAICompatibleProvider,
@@ -38,3 +41,10 @@ export {
   type ToolContext,
   type ToolExecutionResult,
 } from './tools';
+export {
+  ConversationLog,
+  wrapToolContext,
+  defaultLogDir,
+  type ConversationLogEvent,
+  type ConversationLogMeta,
+} from './logging';

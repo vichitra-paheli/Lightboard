@@ -63,3 +63,6 @@ docker/cricket-analytics/
 
 # One-off prompt scratch file used during development
 sample_prompt.txt
+
+# Passive conversation-log drop (dev artifact; see packages/agent/src/logging/)
+.agent-logs/

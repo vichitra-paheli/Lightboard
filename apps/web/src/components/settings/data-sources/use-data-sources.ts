@@ -1,7 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 
 import { queryKeys } from '@/lib/query-keys';
 
@@ -17,11 +17,17 @@ export interface DataSourceRow {
 /** 5 minutes — data sources are metadata, they rarely change mid-session. */
 const METADATA_STALE_TIME = 5 * 60 * 1000;
 
-/** Fetch all data sources for the current org. Shared queryFn. */
+/**
+ * Fetch all data sources for the current org. Shared queryFn.
+ *
+ * Unwraps the API's `{ dataSources }` envelope to a flat array. Other callers
+ * sharing this query key (e.g. the explore page) must return the same shape
+ * or react-query will hand one consumer the other's cached result.
+ */
 async function fetchDataSources(): Promise<DataSourceRow[]> {
   const res = await fetch('/api/data-sources');
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const data = (await res.json()) as { dataSources: DataSourceRow[] };
+  const data = (await res.json()) as { dataSources?: DataSourceRow[] };
   return data.dataSources ?? [];
 }
 
@@ -29,8 +35,17 @@ async function fetchDataSources(): Promise<DataSourceRow[]> {
 export interface DataSourcesState {
   sources: DataSourceRow[];
   loading: boolean;
+  /** Error from the list fetch (not the delete mutation). */
   error: string | null;
   deletingId: string | null;
+  /**
+   * Error from the most recent delete attempt, if any. Stays set until the
+   * next delete is kicked off, so the UI has time to render a toast / inline
+   * banner explaining why the row reappeared after the optimistic removal.
+   */
+  deleteError: { id: string; message: string } | null;
+  /** Clear the last `deleteError`. */
+  clearDeleteError: () => void;
   refetch: () => Promise<void>;
   /** Optimistically remove by id and fire the DELETE request. */
   remove: (id: string) => Promise<void>;
@@ -49,6 +64,7 @@ export interface DataSourcesState {
  */
 export function useDataSources(): DataSourcesState {
   const queryClient = useQueryClient();
+  const [deleteError, setDeleteError] = useState<{ id: string; message: string } | null>(null);
 
   const query = useQuery({
     queryKey: queryKeys.dataSources(),
@@ -59,9 +75,20 @@ export function useDataSources(): DataSourcesState {
   const deleteMutation = useMutation<void, Error, string, { previous?: DataSourceRow[] }>({
     mutationFn: async (id) => {
       const res = await fetch(`/api/data-sources/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        // Try to lift the server's error message; fall back to the status code.
+        let serverMsg: string | undefined;
+        try {
+          const body = (await res.json()) as { error?: string };
+          serverMsg = body?.error;
+        } catch {
+          /* non-JSON body */
+        }
+        throw new Error(serverMsg ?? `HTTP ${res.status}`);
+      }
     },
     onMutate: async (id) => {
+      setDeleteError(null);
       await queryClient.cancelQueries({ queryKey: queryKeys.dataSources() });
       const previous = queryClient.getQueryData<DataSourceRow[]>(queryKeys.dataSources());
       if (previous) {
@@ -72,10 +99,11 @@ export function useDataSources(): DataSourcesState {
       }
       return { previous };
     },
-    onError: (_err, _id, context) => {
+    onError: (err, id, context) => {
       if (context?.previous) {
         queryClient.setQueryData(queryKeys.dataSources(), context.previous);
       }
+      setDeleteError({ id, message: err instanceof Error ? err.message : String(err) });
     },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.dataSources() });
@@ -91,19 +119,22 @@ export function useDataSources(): DataSourcesState {
       try {
         await deleteMutation.mutateAsync(id);
       } catch {
-        // The mutation has already rolled back via `onError`; swallow so the
-        // caller isn't forced to handle it. Errors surface through
-        // `state.error` instead.
+        // The failure is already on `deleteError`; swallow so callers don't
+        // have to guard against rejection.
       }
     },
     [deleteMutation],
   );
+
+  const clearDeleteError = useCallback(() => setDeleteError(null), []);
 
   return {
     sources: query.data ?? [],
     loading: query.isPending,
     error: query.error instanceof Error ? query.error.message : null,
     deletingId: deleteMutation.isPending ? (deleteMutation.variables ?? null) : null,
+    deleteError,
+    clearDeleteError,
     refetch,
     remove,
   };
