@@ -9,8 +9,11 @@ import {
   dataTablePlugin,
   type ViewSpec,
 } from '@lightboard/viz-core';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslations } from 'next-intl';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+
+import { queryKeys } from '@/lib/query-keys';
 
 // Register chart panel plugins on module load so legacy ViewSpec paths
 // continue to render charts for conversations that haven't migrated to the
@@ -85,7 +88,6 @@ export function ExplorePageClient() {
   // Restoring a stale panel-open state on a conversation that no longer has
   // any views is more jarring than starting closed every time.
   const [filmstripOpen, setFilmstripOpen] = useState(false);
-  const [dataSources, setDataSources] = useState<DataSourceOption[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [schemaCuration, setSchemaCuration] = useState<{
     phase: 'callout' | 'generating' | 'editing' | 'saving';
@@ -93,6 +95,41 @@ export function ExplorePageClient() {
   } | null>(null);
   const schemaGenerationTriggered = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const queryClient = useQueryClient();
+
+  /**
+   * Load the org's data sources and project them into the `DataSourceOption`
+   * shape the picker + composer dek consume. Shares the `['data-sources']`
+   * key with the Settings surface so switching between pages doesn't refire
+   * the fetch within the 5 min staleTime window.
+   */
+  const dataSourcesQuery = useQuery({
+    queryKey: queryKeys.dataSources(),
+    queryFn: async () => {
+      const res = await fetch('/api/data-sources');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return (await res.json()) as {
+        dataSources: {
+          id: string;
+          name: string;
+          type: string;
+          config?: Record<string, unknown>;
+        }[];
+      };
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const dataSources: DataSourceOption[] = useMemo(() => {
+    return (
+      dataSourcesQuery.data?.dataSources.map((ds) => ({
+        id: ds.id,
+        name: ds.name,
+        type: ds.type,
+        hasSchemaDoc: !!ds.config?.schemaDoc,
+      })) ?? []
+    );
+  }, [dataSourcesQuery.data]);
   // The active reducer instance for the in-flight assistant message. Held
   // in a ref so `handleStop` can call `.abort()` against the same stateful
   // context the stream is accumulating into.
@@ -157,41 +194,6 @@ export function ExplorePageClient() {
   }, [messages]);
 
   /**
-   * Fetch data sources on mount. Kept as a one-shot `fetch` so the Explore
-   * route renders without a react-query provider; migrating to react-query
-   * is tracked alongside the other server-state work and doesn't belong in
-   * this PR.
-   */
-  useEffect(() => {
-    async function loadSources() {
-      try {
-        const res = await fetch('/api/data-sources');
-        if (res.ok) {
-          const data = await res.json();
-          setDataSources(
-            data.dataSources.map(
-              (ds: {
-                id: string;
-                name: string;
-                type: string;
-                config?: Record<string, unknown>;
-              }) => ({
-                id: ds.id,
-                name: ds.name,
-                type: ds.type,
-                hasSchemaDoc: !!ds.config?.schemaDoc,
-              }),
-            ),
-          );
-        }
-      } catch {
-        // Silently fail — dropdown will be empty
-      }
-    }
-    loadSources();
-  }, []);
-
-  /**
    * Cmd+K focuses the DB picker's dropdown trigger (moved into the shell
    * sidebar in PR 4). The trigger carries a `data-db-picker-trigger`
    * attribute so this selector doesn't have to know the underlying
@@ -237,29 +239,68 @@ export function ExplorePageClient() {
     }
   }, [selectedSource, dataSources, messages]);
 
-  /** Save the curated schema document. */
+  /**
+   * Persist the curated schema document for `selectedSource`. Optimistically
+   * patches the shared `['data-sources']` cache to flip `hasSchemaDoc` so
+   * the picker's doc chip updates before the fetch resolves; rolls back on
+   * failure.
+   */
+  const saveSchemaMutation = useMutation<
+    void,
+    Error,
+    { sourceId: string; markdown: string },
+    { previous?: { dataSources: unknown[] } }
+  >({
+    mutationFn: async ({ sourceId, markdown }) => {
+      const res = await fetch(`/api/data-sources/${sourceId}/schema`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ schemaDoc: markdown }),
+      });
+      if (!res.ok) throw new Error('Save failed');
+    },
+    onMutate: async ({ sourceId }) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.dataSources() });
+      const previous = queryClient.getQueryData<{
+        dataSources: { id: string; config?: Record<string, unknown> }[];
+      }>(queryKeys.dataSources());
+      if (previous) {
+        queryClient.setQueryData(queryKeys.dataSources(), {
+          ...previous,
+          dataSources: previous.dataSources.map((ds) =>
+            ds.id === sourceId
+              ? {
+                  ...ds,
+                  config: { ...(ds.config ?? {}), schemaDoc: true },
+                }
+              : ds,
+          ),
+        });
+      }
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(queryKeys.dataSources(), context.previous);
+      }
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.dataSources() });
+    },
+  });
+
   const handleSaveSchema = useCallback(
     async (markdown: string) => {
       if (!selectedSource) return;
       setSchemaCuration((prev) => (prev ? { ...prev, phase: 'saving' } : null));
       try {
-        const res = await fetch(`/api/data-sources/${selectedSource}/schema`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ schemaDoc: markdown }),
-        });
-        if (!res.ok) throw new Error('Save failed');
-        setDataSources((prev) =>
-          prev.map((ds) =>
-            ds.id === selectedSource ? { ...ds, hasSchemaDoc: true } : ds,
-          ),
-        );
+        await saveSchemaMutation.mutateAsync({ sourceId: selectedSource, markdown });
         setSchemaCuration(null);
       } catch {
         setSchemaCuration((prev) => (prev ? { ...prev, phase: 'editing' } : null));
       }
     },
-    [selectedSource],
+    [selectedSource, saveSchemaMutation],
   );
 
   /**

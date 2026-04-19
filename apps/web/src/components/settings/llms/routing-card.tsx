@@ -1,7 +1,9 @@
 'use client';
 
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslations } from 'next-intl';
-import { useState } from 'react';
+
+import { queryKeys } from '@/lib/query-keys';
 
 import { Select, type SelectOption } from '../primitives';
 import { getProvider } from './provider-catalog';
@@ -20,14 +22,65 @@ export interface RoutingCardProps {
   onUpdated: () => void;
 }
 
+/** Variables the role-assignment mutation accepts. */
+interface AssignRoleVars {
+  role: keyof RoutingMap;
+  configId: string;
+}
+
+/** Snapshot `onMutate` returns so `onError` can roll back. */
+interface AssignRoleContext {
+  previous?: RoutingMap;
+}
+
 /**
  * Maps each agent role to a config row via a pair of dot-prefix selects.
- * PUTs each change independently so a slow request on one row doesn't
- * block the others.
+ * Uses a react-query mutation so each update optimistically patches the
+ * routing cache — the row's new label paints immediately — and rolls back
+ * on failure. Per-role saving state is tracked via the mutation's current
+ * `variables` so parallel clicks on different rows don't block each other.
  */
 export function RoutingCard({ routing, configs, onUpdated }: RoutingCardProps) {
   const t = useTranslations('settings.llms.routing');
-  const [savingRole, setSavingRole] = useState<keyof RoutingMap | null>(null);
+  const queryClient = useQueryClient();
+
+  const assignMutation = useMutation<
+    void,
+    Error,
+    AssignRoleVars,
+    AssignRoleContext
+  >({
+    mutationFn: async ({ role, configId }) => {
+      const res = await fetch('/api/settings/ai/routing', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [role]: configId }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    },
+    onMutate: async ({ role, configId }) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.aiRouting() });
+      const previous = queryClient.getQueryData<RoutingMap>(queryKeys.aiRouting());
+      if (previous) {
+        queryClient.setQueryData<RoutingMap>(queryKeys.aiRouting(), {
+          ...previous,
+          [role]: configId,
+        });
+      }
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(queryKeys.aiRouting(), context.previous);
+      }
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.aiRouting() });
+    },
+    onSuccess: () => {
+      onUpdated();
+    },
+  });
 
   const options: SelectOption[] = configs.map((c) => {
     const provider = getProvider(c.provider);
@@ -39,20 +92,12 @@ export function RoutingCard({ routing, configs, onUpdated }: RoutingCardProps) {
     };
   });
 
-  async function assignRole(role: keyof RoutingMap, configId: string) {
+  function assignRole(role: keyof RoutingMap, configId: string) {
     if (configId === routing[role]) return;
-    setSavingRole(role);
-    try {
-      const res = await fetch('/api/settings/ai/routing', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ [role]: configId }),
-      });
-      if (res.ok) onUpdated();
-    } finally {
-      setSavingRole(null);
-    }
+    assignMutation.mutate({ role, configId });
   }
+
+  const savingRole = assignMutation.isPending ? (assignMutation.variables?.role ?? null) : null;
 
   return (
     <div className="overflow-hidden rounded-[10px] border border-[var(--line-1)] bg-[var(--bg-2)]">

@@ -1,23 +1,36 @@
 ---
 name: settings_v2_state_pattern
-description: PR settings-v2 uses fetch+useState hooks (useLlmData, useDataSources) rather than react-query because the workspace never added @tanstack/react-query. Follow-up PR should port both.
+description: Superseded by feat/react-query-server-state — settings hooks now use react-query
 type: project
 ---
 
-The new settings surface (LLMs + Data Sources) uses plain `fetch` inside a
-`useEffect` + `useState` hook (`useLlmData`, `useDataSources`) instead of
-react-query, even though CLAUDE.md says "react-query for all server state."
+**Status: resolved by PR feat/react-query-server-state (April 2026).**
 
-**Why:** `@tanstack/react-query` isn't in `apps/web/package.json` — never
-was. Adding it mid-feature would have pulled in `QueryClientProvider`
-wiring at the root layout, affected every consumer, and risked breaking
-SSR cache boundaries unrelated to this PR.
+The settings v2 surface originally used plain `fetch` inside a
+`useEffect` + `useState` hook (`useLlmData`, `useDataSources`) because
+`@tanstack/react-query` wasn't in `apps/web/package.json`. The follow-up PR
+completed the migration across the whole web app:
 
-**How to apply:** Any follow-up PR that wants to swap these hooks for
-react-query should (1) add `@tanstack/react-query` to `apps/web`,
-(2) wire `<QueryClientProvider>` into the root dashboard layout, and
-(3) replace `useLlmData` / `useDataSources` with `useQuery` + `useMutation`
-pairs. The file surface is small — the two hooks + their callers in
-`components/settings/{llms,data-sources}/`. The `/api/settings/ai/*`
-routes already return JSON shapes that map cleanly onto react-query keys
-(`['ai-configs']`, `['ai-routing']`).
+1. `@tanstack/react-query` + `@tanstack/react-query-devtools` are in
+   `apps/web/package.json` (v5.59.x).
+2. `LightboardQueryProvider` wraps `AppShell` in
+   `apps/web/src/app/(dashboard)/layout.tsx`. Auth routes (login/register)
+   don't get the provider and don't need it — their fetches are single-shot
+   POSTs.
+3. Shared query keys live in `apps/web/src/lib/query-keys.ts`:
+   `['ai-configs']`, `['ai-routing']`, `['data-sources']`,
+   `['data-sources', id, 'schema']`, `['auth', 'me']`.
+4. `useLlmData` and `useDataSources` now wrap `useQuery` / `useMutation`.
+   Mutations (create config, update config, delete config, assign role,
+   create data source, delete data source, save schema doc) all run
+   optimistic-update -> rollback on error -> invalidate on settle.
+5. `UserAvatar` and `UserMessage` share a single `useCurrentUser` hook at
+   `apps/web/src/lib/use-current-user.ts` so /api/auth/me only fires once.
+6. Devtools gated via dynamic import keyed on NODE_ENV — dev bundle only.
+
+**How to apply:** For any NEW server-state surface, follow the same pattern
+— add a query key to `query-keys.ts`, call `useQuery` with
+`staleTime: 5 * 60 * 1000` for metadata or `60_000` for volatile data,
+and back every mutation with onMutate/onError/onSettled optimistic-update
+handlers. The `test-utils/render-with-query.tsx` helper wraps tests in a
+throwaway QueryClientProvider.

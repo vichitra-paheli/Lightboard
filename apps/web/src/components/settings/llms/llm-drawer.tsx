@@ -1,9 +1,12 @@
 'use client';
 
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslations } from 'next-intl';
 import { useState } from 'react';
 
 import { LightboardLoader } from '@/components/brand';
+import { queryKeys } from '@/lib/query-keys';
+
 import {
   Drawer,
   Field,
@@ -48,6 +51,27 @@ interface FormState {
   makeDefault: boolean;
 }
 
+/** Shape the `/test` endpoint returns. */
+interface TestResult {
+  ok: boolean;
+  message: string;
+  latencyMs?: number;
+}
+
+/** Payload variables the save mutation accepts. */
+interface SaveVars {
+  payload: Record<string, unknown>;
+  makeDefault: boolean;
+}
+
+/** Snapshot taken `onMutate` so `onError` can roll back optimistic inserts. */
+interface SaveContext {
+  previousConfigs?: LlmConfig[];
+  previousRouting?: RoutingMap;
+  /** Temp id the optimistic row carried so we can swap or remove on settle. */
+  tempId?: string;
+}
+
 /** Derive initial state from the drawer mode. */
 function initialState(mode: LlmDrawerMode, routing: RoutingMap): FormState {
   if (mode.kind === 'edit') {
@@ -78,49 +102,33 @@ function initialState(mode: LlmDrawerMode, routing: RoutingMap): FormState {
 /** Drawer for creating or editing an LLM configuration. */
 export function LlmDrawer({ mode, routing, onClose, onSaved }: LlmDrawerProps) {
   const t = useTranslations('settings.llms.drawer');
+  const queryClient = useQueryClient();
   const [form, setForm] = useState<FormState>(() => initialState(mode, routing));
-  const [saving, setSaving] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<
-    { ok: boolean; message: string; latencyMs?: number } | null
-  >(null);
+  const [testResult, setTestResult] = useState<TestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const isEdit = mode.kind === 'edit';
   const provider = getProvider(form.provider);
   const showBaseUrl = provider?.needsBaseUrl ?? false;
 
-  function update(patch: Partial<FormState>) {
-    setForm((f) => ({ ...f, ...patch }));
-  }
-
-  async function handleSave() {
-    setSaving(true);
-    setError(null);
-    try {
-      const payload: Record<string, unknown> = {
-        name: form.name,
-        provider: form.provider,
-        model: form.model,
-        baseUrl: showBaseUrl ? form.baseUrl : null,
-        temperature: form.temperature,
-        maxTokens: form.maxTokens,
-      };
-      // Only send apiKey when it has actually been changed.
-      if (form.apiKey && form.apiKey !== API_KEY_MASK) {
-        payload.apiKey = form.apiKey;
-      } else if (!isEdit) {
-        // New configs must supply a key.
-        if (!form.apiKey) {
-          setError(t('errors.apiKeyRequired'));
-          setSaving(false);
-          return;
-        }
-        payload.apiKey = form.apiKey;
-      }
-
-      const url = isEdit ? `/api/settings/ai/configs/${mode.config.id}` : '/api/settings/ai/configs';
+  /**
+   * Save mutation covers both create (POST) and edit (PUT). Optimistic updates:
+   *
+   * - Create: append a synthetic row with `id: tempId` so the list shows
+   *   immediately; `onSuccess` replaces it with the server row; `onError`
+   *   drops it.
+   * - Edit: patch the existing row in place so name / provider / model
+   *   changes paint instantly; `onError` reverts to the snapshot.
+   *
+   * The routing PUT for the "make default" toggle runs after the save
+   * settles — it's a separate request that only fires when the user checked
+   * the toggle, and it invalidates the routing cache itself.
+   */
+  const saveMutation = useMutation<LlmConfig, Error, SaveVars, SaveContext>({
+    mutationFn: async ({ payload }) => {
+      const url = isEdit
+        ? `/api/settings/ai/configs/${mode.config.id}`
+        : '/api/settings/ai/configs';
       const res = await fetch(url, {
         method: isEdit ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -131,59 +139,211 @@ export function LlmDrawer({ mode, routing, onClose, onSaved }: LlmDrawerProps) {
         throw new Error(data?.error ?? `HTTP ${res.status}`);
       }
       const data = (await res.json()) as { config: LlmConfig };
+      return data.config;
+    },
+    onMutate: async ({ payload }) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.aiConfigs() });
+      const previousConfigs = queryClient.getQueryData<LlmConfig[]>(queryKeys.aiConfigs());
 
-      // Apply the "workspace default" intent to routing. Only pushes if the
-      // user toggled it on for a config that isn't currently leader.
-      if (form.makeDefault && routing.leader !== data.config.id) {
+      if (isEdit) {
+        if (previousConfigs) {
+          queryClient.setQueryData<LlmConfig[]>(
+            queryKeys.aiConfigs(),
+            previousConfigs.map((c) =>
+              c.id === mode.config.id
+                ? {
+                    ...c,
+                    name: (payload.name as string) ?? c.name,
+                    provider: (payload.provider as string) ?? c.provider,
+                    model: (payload.model as string) ?? c.model,
+                    baseUrl: (payload.baseUrl as string | null) ?? c.baseUrl,
+                    temperature:
+                      typeof payload.temperature === 'number'
+                        ? payload.temperature
+                        : c.temperature,
+                    maxTokens:
+                      typeof payload.maxTokens === 'number' ? payload.maxTokens : c.maxTokens,
+                  }
+                : c,
+            ),
+          );
+        }
+        return { previousConfigs };
+      }
+
+      // Create — synthesize a temp row so the list doesn't flash empty.
+      const tempId = `temp-${Date.now()}`;
+      const optimisticRow: LlmConfig = {
+        id: tempId,
+        name: (payload.name as string) ?? '',
+        provider: (payload.provider as string) ?? '',
+        model: (payload.model as string) ?? '',
+        baseUrl: (payload.baseUrl as string | null) ?? null,
+        temperature:
+          typeof payload.temperature === 'number' ? payload.temperature : 0.2,
+        maxTokens: typeof payload.maxTokens === 'number' ? payload.maxTokens : 4096,
+        hasApiKey: !!payload.apiKey,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      queryClient.setQueryData<LlmConfig[]>(queryKeys.aiConfigs(), [
+        ...(previousConfigs ?? []),
+        optimisticRow,
+      ]);
+      return { previousConfigs, tempId };
+    },
+    onError: (err, _vars, context) => {
+      if (context?.previousConfigs) {
+        queryClient.setQueryData(queryKeys.aiConfigs(), context.previousConfigs);
+      }
+      setError(err.message);
+    },
+    onSuccess: async (serverRow, { makeDefault }, context) => {
+      // Swap the optimistic temp row with the real server row. For edits the
+      // existing row has already been patched so we just overwrite with the
+      // authoritative data.
+      const current = queryClient.getQueryData<LlmConfig[]>(queryKeys.aiConfigs()) ?? [];
+      if (context?.tempId) {
+        queryClient.setQueryData<LlmConfig[]>(
+          queryKeys.aiConfigs(),
+          current.map((c) => (c.id === context.tempId ? serverRow : c)),
+        );
+      } else {
+        queryClient.setQueryData<LlmConfig[]>(
+          queryKeys.aiConfigs(),
+          current.map((c) => (c.id === serverRow.id ? serverRow : c)),
+        );
+      }
+
+      if (makeDefault && routing.leader !== serverRow.id) {
         await fetch('/api/settings/ai/routing', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ leader: data.config.id }),
+          body: JSON.stringify({ leader: serverRow.id }),
         });
+        await queryClient.invalidateQueries({ queryKey: queryKeys.aiRouting() });
       }
-      onSaved();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSaving(false);
-    }
-  }
 
-  async function handleDelete() {
-    if (!isEdit) return;
-    setDeleting(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/settings/ai/configs/${mode.config.id}`, { method: 'DELETE' });
+      onSaved();
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.aiConfigs() });
+    },
+  });
+
+  /**
+   * Delete mutation — optimistic removal of the row. Rolls back on 409
+   * (config is referenced by routing) so the row reappears with the
+   * error banner explaining why.
+   */
+  const deleteMutation = useMutation<
+    void,
+    Error,
+    void,
+    { previousConfigs?: LlmConfig[] }
+  >({
+    mutationFn: async () => {
+      if (!isEdit) return;
+      const res = await fetch(`/api/settings/ai/configs/${mode.config.id}`, {
+        method: 'DELETE',
+      });
       if (res.status === 409) {
         const data = (await res.json()) as { error: string };
-        setError(data.error);
-        return;
+        throw new Error(data.error);
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    },
+    onMutate: async () => {
+      if (!isEdit) return {};
+      await queryClient.cancelQueries({ queryKey: queryKeys.aiConfigs() });
+      const previousConfigs = queryClient.getQueryData<LlmConfig[]>(queryKeys.aiConfigs());
+      if (previousConfigs) {
+        queryClient.setQueryData<LlmConfig[]>(
+          queryKeys.aiConfigs(),
+          previousConfigs.filter((c) => c.id !== mode.config.id),
+        );
+      }
+      return { previousConfigs };
+    },
+    onError: (err, _vars, context) => {
+      if (context?.previousConfigs) {
+        queryClient.setQueryData(queryKeys.aiConfigs(), context.previousConfigs);
+      }
+      setError(err.message);
+    },
+    onSuccess: () => {
       onSaved();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setDeleting(false);
-    }
-  }
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.aiConfigs() });
+    },
+  });
 
-  async function handleTest() {
-    if (!isEdit) return;
-    setTesting(true);
-    setTestResult(null);
-    try {
-      const res = await fetch(`/api/settings/ai/configs/${mode.config.id}/test`, { method: 'POST' });
-      const data = (await res.json()) as { ok: boolean; message: string; latencyMs?: number };
+  /**
+   * "Test connection" mutation — non-optimistic, just surfaces the latency
+   * and status message from the server. Uses a mutation (not a query) so
+   * users can re-trigger it by clicking, and so the drawer can show a
+   * loader during the request.
+   */
+  const testMutation = useMutation<TestResult, Error, void>({
+    mutationFn: async () => {
+      if (!isEdit) throw new Error('Cannot test an unsaved config');
+      const res = await fetch(`/api/settings/ai/configs/${mode.config.id}/test`, {
+        method: 'POST',
+      });
+      return (await res.json()) as TestResult;
+    },
+    onSuccess: (data) => {
       setTestResult(data);
-    } catch (err) {
-      setTestResult({ ok: false, message: err instanceof Error ? err.message : String(err) });
-    } finally {
-      setTesting(false);
-    }
+    },
+    onError: (err) => {
+      setTestResult({ ok: false, message: err.message });
+    },
+  });
+
+  function update(patch: Partial<FormState>) {
+    setForm((f) => ({ ...f, ...patch }));
   }
 
+  function handleSave() {
+    setError(null);
+    const payload: Record<string, unknown> = {
+      name: form.name,
+      provider: form.provider,
+      model: form.model,
+      baseUrl: showBaseUrl ? form.baseUrl : null,
+      temperature: form.temperature,
+      maxTokens: form.maxTokens,
+    };
+    // Only send apiKey when it has actually been changed.
+    if (form.apiKey && form.apiKey !== API_KEY_MASK) {
+      payload.apiKey = form.apiKey;
+    } else if (!isEdit) {
+      // New configs must supply a key.
+      if (!form.apiKey) {
+        setError(t('errors.apiKeyRequired'));
+        return;
+      }
+      payload.apiKey = form.apiKey;
+    }
+    saveMutation.mutate({ payload, makeDefault: form.makeDefault });
+  }
+
+  function handleDelete() {
+    if (!isEdit) return;
+    setError(null);
+    deleteMutation.mutate();
+  }
+
+  function handleTest() {
+    if (!isEdit) return;
+    setTestResult(null);
+    testMutation.mutate();
+  }
+
+  const saving = saveMutation.isPending;
+  const deleting = deleteMutation.isPending;
+  const testing = testMutation.isPending;
   const modelOptions = (provider?.models ?? []).map((m) => ({ value: m, label: m }));
 
   return (
