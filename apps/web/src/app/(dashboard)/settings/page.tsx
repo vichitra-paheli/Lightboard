@@ -1,13 +1,11 @@
-import { AIModelSettings } from '@/components/settings/ai-model-settings';
+import { redirect } from 'next/navigation';
 
 /**
- * Settings page — application configuration.
- * Includes AI model provider settings.
+ * Settings index — redirects to the default sub-section.
+ * The settings shell lives under `/settings/{section}`; visiting the bare
+ * `/settings` path funnels users to Data Sources, which is the most common
+ * entry point.
  */
-export default function SettingsPage() {
-  return (
-    <div className="p-6 space-y-6">
-      <AIModelSettings />
-    </div>
-  );
+export default function SettingsIndexPage(): never {
+  redirect('/settings/data-sources');
 }

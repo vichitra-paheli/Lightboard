@@ -102,31 +102,186 @@
     "loadingSchema": "Loading schema…",
     "loadingSources": "Loading data sources…"
   },
+  "settings": {
+    "title": "Settings",
+    "nav": {
+      "workspace": "Workspace",
+      "account": "Account",
+      "dataSources": "Datasources",
+      "llms": "LLM providers",
+      "members": "Members",
+      "general": "General",
+      "profile": "Profile",
+      "appearance": "Appearance",
+      "keyboard": "Keyboard",
+      "soon": "soon"
+    },
+    "llms": {
+      "eyebrow": "Workspace",
+      "title": "LLM providers",
+      "description": "Configure the models Lightboard uses to route queries. Different agent roles can pick different models — add as many as you like.",
+      "addModel": "+ Add model",
+      "loading": "Loading models…",
+      "routing": {
+        "title": "Routing",
+        "subtitle": "Which model handles which job.",
+        "unassigned": "— select a model —",
+        "roles": {
+          "leader": {
+            "label": "Leader / orchestrator",
+            "desc": "Top-level chat, tool routing, narrative."
+          },
+          "query": {
+            "label": "Query agent",
+            "desc": "Writes SQL and explores schema."
+          },
+          "view": {
+            "label": "View agent",
+            "desc": "Generates HTML visualizations."
+          },
+          "insights": {
+            "label": "Insights agent",
+            "desc": "Stats, correlations, and summaries."
+          }
+        }
+      },
+      "configs": {
+        "sectionLabel": "Configured models",
+        "default": "Default",
+        "active": "Active",
+        "routes": "Routes",
+        "noRoutes": "Not routed yet",
+        "placeholder": "UI only",
+        "placeholderHint": "This provider is selectable but not yet implemented on the server. Chat using this config will fail until the provider class lands.",
+        "empty": "No models configured yet. Add one to wire the agent up."
+      },
+      "drawer": {
+        "newTitle": "Add model",
+        "newSubtitle": "Connect a provider so the agent can route queries to it.",
+        "editTitle": "Edit {name}",
+        "editSubtitle": "Change the provider, key, or routing for this model.",
+        "close": "Close drawer",
+        "provider": "Provider",
+        "name": "Display name",
+        "nameHint": "used in UI",
+        "model": "Model",
+        "modelPlaceholder": "Select a model…",
+        "apiKey": "API key",
+        "apiKeyHintNew": "stored encrypted",
+        "apiKeyHintEdit": "leave blank to keep",
+        "baseUrl": "Base URL",
+        "temperature": "Temperature",
+        "maxTokens": "Max output tokens",
+        "defaultLabel": "Default model",
+        "defaultToggleLabel": "Use this as the workspace default",
+        "defaultToggleDesc": "Assigns this model to the Leader role so new conversations start on it unless a role routes elsewhere.",
+        "secretBadge": "secret",
+        "testTitle": "Send a ping",
+        "testDesc": "Hits the provider with a 1-token prompt so you know the key works.",
+        "runTest": "Run test",
+        "cancel": "Cancel",
+        "add": "Add model",
+        "saveChanges": "Save changes",
+        "remove": "Remove",
+        "soon": "soon",
+        "errors": {
+          "apiKeyRequired": "API key is required for new configurations."
+        }
+      }
+    },
+    "dataSources": {
+      "eyebrow": "Workspace",
+      "title": "Datasources",
+      "description": "Databases Lightboard can read from. Each source has its own schema documentation that the agent uses to write accurate SQL.",
+      "addDatasource": "+ Add datasource",
+      "loading": "Loading data sources…",
+      "empty": "No data sources configured yet.",
+      "list": {
+        "source": "Source",
+        "schemaDoc": "Schema doc",
+        "tables": "Tables",
+        "tablesUnit": "tables",
+        "status": "Status",
+        "actions": "",
+        "connected": "Connected",
+        "delete": "Delete",
+        "cancel": "Cancel",
+        "confirmDelete": "Confirm delete"
+      },
+      "schemaDoc": {
+        "ready": "Ready",
+        "partial": "Partial",
+        "empty": "Not set",
+        "coverage": "{percent}% coverage"
+      },
+      "detail": {
+        "back": "← Datasources",
+        "editConnection": "Edit connection",
+        "refreshSchema": "Refresh schema",
+        "notFound": "Data source not found.",
+        "schemaLoading": "Loading schema…",
+        "tabs": {
+          "schema": "Schema doc",
+          "connection": "Connection",
+          "access": "Access & roles"
+        },
+        "connection": {
+          "connection": "Connection",
+          "health": "Health",
+          "type": "Type",
+          "host": "Host",
+          "port": "Port",
+          "database": "Database",
+          "user": "User",
+          "password": "Password",
+          "ssl": "SSL",
+          "status": "Status",
+          "connected": "Connected",
+          "tablesVisible": "Tables visible"
+        },
+        "access": {
+          "title": "Access & roles",
+          "body": "Row-level rules, PII masks, and per-role visibility coming soon."
+        }
+      },
+      "schemaEmpty": {
+        "title": "Document this datasource",
+        "body": "Before the agent can write reliable SQL against <source></source>, it needs to understand your tables, columns, and business logic. We'll walk you through it — conversationally.",
+        "startWithAi": "Start with AI",
+        "startWithAiDisabled": "Coming soon — AI-guided schema authoring ships in the next release.",
+        "importDbt": "Import dbt docs",
+        "startBlank": "Start blank",
+        "tablesDetected": "{count, plural, =0 {No tables detected} =1 {1 table detected} other {# tables detected}}",
+        "guidedDuration": "~15 min guided"
+      },
+      "drawer": {
+        "newTitle": "Add datasource",
+        "newSubtitle": "Connect a database so Lightboard can query it.",
+        "close": "Close drawer",
+        "name": "Name",
+        "nameHint": "used in UI",
+        "type": "Type",
+        "host": "Host",
+        "port": "Port",
+        "database": "Database",
+        "user": "User",
+        "password": "Password",
+        "advanced": "Advanced",
+        "sslLabel": "Require SSL",
+        "sslDesc": "Reject the connection if the server doesn't support TLS.",
+        "testTitle": "Test connection",
+        "testDesc": "Verifies the credentials without saving.",
+        "testWillVerifyOnSave": "Will verify on save.",
+        "runTest": "Run test",
+        "cancel": "Cancel",
+        "add": "Add datasource"
+      }
+    }
+  },
   "views": {
     "title": "Views",
     "emptyState": "No views created yet.",
     "createFirst": "Open Explore to create your first view."
-  },
-  "settings": {
-    "title": "Settings",
-    "ai": {
-      "title": "AI Model Configuration",
-      "description": "Configure the AI model used for data exploration.",
-      "providerType": "Provider",
-      "providerClaude": "Claude (Anthropic)",
-      "providerOpenAI": "OpenAI-Compatible",
-      "apiKey": "API Key",
-      "apiKeyPlaceholder": "Enter your API key",
-      "baseUrl": "Base URL",
-      "baseUrlPlaceholder": "https://your-endpoint.com/v1",
-      "model": "Model Name",
-      "modelPlaceholder": "e.g. gpt-4o, claude-sonnet-4-20250514",
-      "save": "Save",
-      "saving": "Saving...",
-      "saved": "AI model configuration saved.",
-      "error": "Failed to save configuration.",
-      "noConfig": "No AI model configured. The agent will use the server default if available."
-    }
   },
   "auth": {
     "login": "Log in",

@@ -1,9 +1,10 @@
-import { DataSourcesPageClient } from '@/components/data-sources/data-sources-page-client';
+import { redirect } from 'next/navigation';
 
 /**
- * Data Sources page — manage database connections.
- * Server component wrapper for the client-side data source management UI.
+ * Legacy `/data-sources` route — redirects to the settings sub-section.
+ * Shipped alongside the v2 settings shell; delete this file in a later
+ * release once outbound links have been updated across the docs.
  */
-export default function DataSourcesPage() {
-  return <DataSourcesPageClient />;
+export default function LegacyDataSourcesPage(): never {
+  redirect('/settings/data-sources');
 }

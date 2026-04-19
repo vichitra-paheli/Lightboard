@@ -5,6 +5,7 @@ export {
   InsightsAgent,
   LeaderAgent,
   type LeaderAgentConfig,
+  type LeaderProviderMap,
   type SubAgent,
   type SubAgentConfig,
   type SubAgentRole,
