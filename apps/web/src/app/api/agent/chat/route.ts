@@ -20,7 +20,7 @@ import {
   type Message,
   type ToolContext,
 } from '@lightboard/agent';
-import { resolveAIProvider } from '@/lib/ai-provider';
+import { resolveAIProviders } from '@/lib/ai-provider';
 
 /**
  * Singleton ScratchpadManager for session scratchpad lifecycle.
@@ -107,12 +107,12 @@ export const POST = withAuth(async (req, { db, orgId }) => {
     return response;
   }
 
-  // Resolve AI provider from org settings or env var fallback
-  const provider = await resolveAIProvider(db, orgId);
-  if (!provider) {
+  // Resolve per-role AI providers from org settings or env var fallback
+  const providers = await resolveAIProviders(db, orgId);
+  if (!providers) {
     return NextResponse.json(
       {
-        error: 'AI agent is not configured. Set up a model in Settings or set the ANTHROPIC_API_KEY environment variable.',
+        error: 'AI agent is not configured. Add a model under Settings → LLM providers or set the ANTHROPIC_API_KEY environment variable.',
       },
       { status: 503 },
     );
@@ -204,7 +204,7 @@ export const POST = withAuth(async (req, { db, orgId }) => {
     cached.lastAccess = Date.now();
   } else {
     leader = new LeaderAgent({
-      provider,
+      providers,
       toolContext,
       dataSources: agentDataSources,
       scratchpadManager,

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getAdminDb, withAuth } from '@/lib/auth';
 import { getDataSourceConnection, DataSourceError } from '@/lib/data-source-service';
-import { resolveAIProvider } from '@/lib/ai-provider';
+import { resolveAIProviders } from '@/lib/ai-provider';
 import { generateSchemaContext, renderSchemaContext } from '@lightboard/agent';
 
 /** Annotation system prompt for the LLM. */
@@ -47,9 +47,10 @@ export const POST = withAuth(async (req, { db, orgId }) => {
     );
   }
 
-  // Step 2: Annotate with LLM (if provider is available)
-  const provider = await resolveAIProvider(db, orgId);
-  if (!provider) {
+  // Step 2: Annotate with LLM (if a provider is available)
+  // Schema annotation is a leader-class task, so use the leader-routed provider.
+  const providers = await resolveAIProviders(db, orgId);
+  if (!providers) {
     // No LLM configured — return raw markdown for manual editing
     return NextResponse.json({ rawMarkdown, annotatedMarkdown: rawMarkdown });
   }
@@ -62,7 +63,7 @@ export const POST = withAuth(async (req, { db, orgId }) => {
       : rawMarkdown;
 
     let annotatedMarkdown = '';
-    const stream = provider.chat(
+    const stream = providers.leader.chat(
       [{ role: 'user', content: schemaForLLM }],
       [], // no tools
       { system: ANNOTATION_PROMPT },

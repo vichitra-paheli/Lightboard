@@ -15,10 +15,32 @@ import { TaskPool, type TaskHandle } from './task-pool';
 import type { AgentTask, SubAgentResult, SubAgentRole } from './types';
 import { ViewAgent } from './view-agent';
 
+/**
+ * Per-role provider map — leader + each sub-agent gets its own
+ * {@link LLMProvider} instance. This lets an org route cheaper/faster models
+ * to bulk work (query introspection, summarization) while keeping a stronger
+ * model on the leader.
+ */
+export type LeaderProviderMap = {
+  leader: LLMProvider;
+  query: LLMProvider;
+  view: LLMProvider;
+  insights: LLMProvider;
+};
+
 /** Configuration for creating a LeaderAgent. */
 export interface LeaderAgentConfig {
-  /** LLM provider for the leader and sub-agents. */
-  provider: LLMProvider;
+  /**
+   * Single LLM provider used for the leader and every sub-agent.
+   * Kept for back-compat with callers that don't yet route per-role;
+   * supersede by passing {@link LeaderAgentConfig.providers}.
+   */
+  provider?: LLMProvider;
+  /**
+   * Per-role provider map. When set, this wins over {@link LeaderAgentConfig.provider}
+   * and each sub-agent is built against the matching instance.
+   */
+  providers?: LeaderProviderMap;
   /** Tool context for creating sub-agent ToolRouters. */
   toolContext: ToolContext;
   /** Available data sources. */
@@ -78,7 +100,12 @@ interface SubAgentRunOutcome {
  *     finishes.
  */
 export class LeaderAgent {
-  private provider: LLMProvider;
+  /**
+   * Per-role provider map. The leader uses `providers.leader`; each sub-agent
+   * is constructed against its matching entry. When only the legacy `provider`
+   * field is supplied, the map is filled with the same instance for every role.
+   */
+  private providers: LeaderProviderMap;
   private toolContext: ToolContext;
   private dataSources: AgentDataSource[];
   private scratchpadManager: ScratchpadManager;
@@ -94,7 +121,15 @@ export class LeaderAgent {
   private pendingEvents: AgentEvent[] = [];
 
   constructor(config: LeaderAgentConfig) {
-    this.provider = config.provider;
+    if (!config.providers && !config.provider) {
+      throw new Error('LeaderAgent requires either `providers` or `provider`');
+    }
+    this.providers = config.providers ?? {
+      leader: config.provider!,
+      query: config.provider!,
+      view: config.provider!,
+      insights: config.provider!,
+    };
     this.toolContext = config.toolContext;
     this.dataSources = config.dataSources;
     this.scratchpadManager = config.scratchpadManager ?? new ScratchpadManager();
@@ -102,6 +137,15 @@ export class LeaderAgent {
     this.maxToolRounds = config.maxToolRounds ?? 10;
     this.subAgentMaxRounds = config.subAgentMaxRounds ?? 5;
     this.drainTimeoutMs = config.drainTimeoutMs ?? DEFAULT_DRAIN_TIMEOUT_MS;
+  }
+
+  /**
+   * Provider used by the leader itself (not its sub-agents). Kept as a
+   * backwards-compatible accessor for callers that peek at this for tests
+   * or observability.
+   */
+  get provider(): LLMProvider {
+    return this.providers.leader;
   }
 
   /**
@@ -135,7 +179,7 @@ export class LeaderAgent {
       let textContent = '';
       let hasToolCalls = false;
 
-      const stream = this.provider.chat(
+      const stream = this.providers.leader.chat(
         this.conversation.getMessages(),
         leaderTools,
         { system: systemPrompt },
@@ -464,7 +508,7 @@ export class LeaderAgent {
 
       const queryRouter = new ToolRouter(this.toolContext, queryTools);
       const agent = new QueryAgent({
-        provider: this.provider,
+        provider: this.providers.query,
         toolRouter: queryRouter,
         maxToolRounds: this.subAgentMaxRounds,
         onStatus,
@@ -497,7 +541,7 @@ export class LeaderAgent {
     if (role === 'view') {
       const viewRouter = new ToolRouter(this.toolContext, viewTools);
       const agent = new ViewAgent({
-        provider: this.provider,
+        provider: this.providers.view,
         toolRouter: viewRouter,
         maxToolRounds: this.subAgentMaxRounds,
         onStatus,
@@ -524,7 +568,7 @@ export class LeaderAgent {
     // role === 'insights'
     const insightsRouter = new ToolRouter(this.toolContext, insightsTools);
     const agent = new InsightsAgent({
-      provider: this.provider,
+      provider: this.providers.insights,
       toolRouter: insightsRouter,
       maxToolRounds: this.subAgentMaxRounds,
       onStatus,

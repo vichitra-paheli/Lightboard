@@ -1,8 +1,12 @@
+export { agentRoleAssignments } from './agent-role-assignments';
 export { dataSources } from './data-sources';
 export { dataSourceTypeEnum, userRoleEnum, visibilityEnum } from './enums';
+export { modelConfigs } from './model-configs';
 export { organizations } from './organizations';
 export {
+  agentRoleAssignmentsRelations,
   dataSourcesRelations,
+  modelConfigsRelations,
   organizationsRelations,
   sessionsRelations,
   usersRelations,
