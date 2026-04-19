@@ -1,5 +1,6 @@
 export { ClaudeProvider, type ClaudeProviderConfig } from './claude';
 export { OpenAICompatibleProvider, type OpenAICompatibleConfig } from './openai-compatible';
+export { DEFAULT_MAX_OUTPUT_TOKENS } from './constants';
 export type {
   ChatOptions,
   LLMProvider,
@@ -9,4 +10,4 @@ export type {
   ToolDefinition,
   ToolResult,
 } from './types';
-export { LLMError } from './types';
+export { LLMError, type LLMErrorReason } from './types';

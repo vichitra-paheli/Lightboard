@@ -196,6 +196,8 @@
       "addDatasource": "+ Add datasource",
       "loading": "Loading data sources…",
       "empty": "No data sources configured yet.",
+      "deleteFailed": "Couldn't delete that data source: {message}",
+      "dismiss": "Dismiss",
       "list": {
         "source": "Source",
         "schemaDoc": "Schema doc",
@@ -253,6 +255,21 @@
         "startBlank": "Start blank",
         "tablesDetected": "{count, plural, =0 {No tables detected} =1 {1 table detected} other {# tables detected}}",
         "guidedDuration": "~15 min guided"
+      },
+      "schemaEditor": {
+        "title": "Schema doc",
+        "description": "Markdown briefing the agent reads before every query against this source. Edit directly or generate a first draft with AI.",
+        "generate": "Generate with AI",
+        "regenerate": "Regenerate with AI",
+        "generating": "Generating…",
+        "save": "Save",
+        "saving": "Saving…",
+        "saved": "Saved",
+        "reset": "Reset",
+        "unsavedChanges": "Unsaved changes",
+        "charCount": "{count, plural, =0 {empty} =1 {1 char} other {# chars}}",
+        "placeholder": "# Your datasource name\n\nOne-paragraph description.\n\n### Tables\n…\n\nClick Generate with AI to draft this automatically.",
+        "confirmRegenerate": "Regenerating will overwrite your current schema doc. Continue?"
       },
       "drawer": {
         "newTitle": "Add datasource",

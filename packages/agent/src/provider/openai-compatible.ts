@@ -1,5 +1,6 @@
-import type { ChatOptions, LLMProvider, Message, StreamEvent, ToolDefinition } from './types';
+import type { ChatOptions, LLMErrorReason, LLMProvider, Message, StreamEvent, ToolDefinition } from './types';
 import { LLMError } from './types';
+import { DEFAULT_MAX_OUTPUT_TOKENS } from './constants';
 
 /** Configuration for OpenAI-compatible providers (Ollama, vLLM, etc.). */
 export interface OpenAICompatibleConfig {
@@ -27,7 +28,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
     this.baseUrl = url;
     this.apiKey = config.apiKey ?? '';
     this.defaultModel = config.model;
-    this.defaultMaxTokens = config.maxTokens ?? 4096;
+    this.defaultMaxTokens = config.maxTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
   }
 
   /** Stream a chat response from an OpenAI-compatible endpoint. */
@@ -89,6 +90,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
         'openai-compatible',
         response.status,
         response.status === 429 || response.status >= 500,
+        classifyOpenAIError(response.status, errorDetail),
       );
     }
 
@@ -170,6 +172,19 @@ export class OpenAICompatibleProvider implements LLMProvider {
             yield { type: 'message_end', stopReason: 'end_turn' };
             return;
           }
+          if (finishReason === 'length') {
+            // OpenAI's signal for output-token ceiling hit. Surface as a
+            // structured error so the UI can tell the user which knob to
+            // turn. Emit any pending tool calls first so nothing is lost.
+            yield* flushToolCalls();
+            throw new LLMError(
+              `Output truncated at max_tokens=${options?.maxTokens ?? this.defaultMaxTokens}. Raise the model's max_tokens setting for this agent role.`,
+              'openai-compatible',
+              undefined,
+              false,
+              'output_tokens_exceeded',
+            );
+          }
         } catch {
           // Skip malformed SSE lines
         }
@@ -216,4 +231,27 @@ export class OpenAICompatibleProvider implements LLMProvider {
 
     return result;
   }
+}
+
+/**
+ * Classify an HTTP error from an OpenAI-compatible endpoint into a structured
+ * {@link LLMErrorReason}. Pattern-matches the error body because providers
+ * differ on status codes for token-limit issues (some use 400, others 413).
+ */
+function classifyOpenAIError(status: number, body: string): LLMErrorReason {
+  const msg = body.toLowerCase();
+  if (status === 401 || status === 403) return 'auth';
+  if (status === 429) return 'rate_limited';
+  if (status >= 500) return 'server_error';
+  if (msg.includes('max_tokens') || msg.includes('max tokens') || msg.includes('output token')) {
+    return 'output_tokens_exceeded';
+  }
+  if (msg.includes('context') && (msg.includes('length') || msg.includes('window'))) {
+    return 'context_length_exceeded';
+  }
+  if (msg.includes('maximum context') || msg.includes('too many tokens')) {
+    return 'context_length_exceeded';
+  }
+  if (status === 400) return 'invalid_request';
+  return 'unknown';
 }

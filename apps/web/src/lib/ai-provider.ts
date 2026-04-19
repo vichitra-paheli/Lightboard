@@ -17,6 +17,21 @@ export const AGENT_ROLES: readonly AgentRole[] = ['leader', 'query', 'view', 'in
 /** Mapping from each agent role to a concrete provider instance. */
 export type ProviderMap = Record<AgentRole, LLMProvider>;
 
+/**
+ * Per-role output-token ceiling lifted from `model_configs.max_tokens`. Values
+ * default to `undefined` when a role's model config has no configured max; the
+ * agent then falls through to the provider's stored default
+ * (`DEFAULT_MAX_OUTPUT_TOKENS`). This map is threaded into LeaderAgent so the
+ * user-configured value is applied explicitly at the chat() call site.
+ */
+export type MaxTokensMap = Partial<Record<AgentRole, number>>;
+
+/** Combined resolution result — providers + per-role token ceilings. */
+export interface ResolvedAIProviders {
+  providers: ProviderMap;
+  maxTokens: MaxTokensMap;
+}
+
 /** Provider keys that have a real implementation wired up in this release. */
 export const IMPLEMENTED_PROVIDERS = new Set([
   'anthropic',
@@ -96,7 +111,7 @@ function instantiateProvider(row: ResolvedConfigRow, apiKey: string): LLMProvide
 export async function resolveAIProviders(
   db: Database,
   orgId: string,
-): Promise<ProviderMap | null> {
+): Promise<ResolvedAIProviders | null> {
   const masterKey = process.env.ENCRYPTION_MASTER_KEY;
 
   // 1. Routing rows + configs (preferred path).
@@ -116,6 +131,7 @@ export async function resolveAIProviders(
 
   if (rows.length > 0 && masterKey) {
     const partial: Partial<ProviderMap> = {};
+    const maxTokensPartial: MaxTokensMap = {};
     for (const row of rows) {
       const role = row.role as AgentRole;
       if (!AGENT_ROLES.includes(role)) continue;
@@ -128,6 +144,9 @@ export async function resolveAIProviders(
           },
           apiKey,
         );
+        if (typeof row.maxTokens === 'number') {
+          maxTokensPartial[role] = row.maxTokens;
+        }
       } catch {
         // Decryption or instantiation failed — leave this role unmapped
         // so the fallbacks below still get a chance to fill it.
@@ -139,18 +158,32 @@ export async function resolveAIProviders(
     if (partial.leader) {
       for (const role of AGENT_ROLES) {
         if (!partial[role]) partial[role] = partial.leader;
+        if (maxTokensPartial[role] === undefined && maxTokensPartial.leader !== undefined) {
+          maxTokensPartial[role] = maxTokensPartial.leader;
+        }
       }
-      return partial as ProviderMap;
+      return { providers: partial as ProviderMap, maxTokens: maxTokensPartial };
     }
 
     // Missing leader but some other role set — still usable: pick any.
     const anyConcrete = AGENT_ROLES.map((r) => partial[r]).find((p): p is LLMProvider => !!p);
     if (anyConcrete) {
+      const anyMaxTokens = AGENT_ROLES.map((r) => maxTokensPartial[r]).find(
+        (v): v is number => typeof v === 'number',
+      );
       return {
-        leader: anyConcrete,
-        query: partial.query ?? anyConcrete,
-        view: partial.view ?? anyConcrete,
-        insights: partial.insights ?? anyConcrete,
+        providers: {
+          leader: anyConcrete,
+          query: partial.query ?? anyConcrete,
+          view: partial.view ?? anyConcrete,
+          insights: partial.insights ?? anyConcrete,
+        },
+        maxTokens: {
+          leader: maxTokensPartial.leader ?? anyMaxTokens,
+          query: maxTokensPartial.query ?? anyMaxTokens,
+          view: maxTokensPartial.view ?? anyMaxTokens,
+          insights: maxTokensPartial.insights ?? anyMaxTokens,
+        },
       };
     }
   }
@@ -181,7 +214,10 @@ export async function resolveAIProviders(
               apiKey,
               model: aiConfig?.model ?? 'gpt-4o',
             });
-      return { leader: single, query: single, view: single, insights: single };
+      return {
+        providers: { leader: single, query: single, view: single, insights: single },
+        maxTokens: {},
+      };
     } catch {
       // Fall through to env-var fallback.
     }
@@ -191,7 +227,10 @@ export async function resolveAIProviders(
   const envKey = process.env.ANTHROPIC_API_KEY;
   if (envKey) {
     const single = new ClaudeProvider({ apiKey: envKey });
-    return { leader: single, query: single, view: single, insights: single };
+    return {
+      providers: { leader: single, query: single, view: single, insights: single },
+      maxTokens: {},
+    };
   }
 
   return null;

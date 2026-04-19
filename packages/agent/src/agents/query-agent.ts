@@ -48,6 +48,7 @@ export class QueryAgent implements SubAgent {
 
       const stream = this.config.provider.chat(messages, this.tools, {
         system: systemPrompt,
+        maxTokens: this.config.maxTokens,
       });
 
       for await (const event of stream) {

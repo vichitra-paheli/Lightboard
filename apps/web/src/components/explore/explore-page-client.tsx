@@ -108,21 +108,26 @@ export function ExplorePageClient() {
     queryFn: async () => {
       const res = await fetch('/api/data-sources');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return (await res.json()) as {
-        dataSources: {
+      const body = (await res.json()) as {
+        dataSources?: {
           id: string;
           name: string;
           type: string;
           config?: Record<string, unknown>;
         }[];
       };
+      // Normalize to a flat array — shared cache key with `useDataSources`,
+      // whose queryFn also returns the unwrapped shape. Divergent shapes
+      // under the same key cause `.map is not a function` when one page's
+      // cache is read by the other.
+      return body.dataSources ?? [];
     },
     staleTime: 5 * 60 * 1000,
   });
 
   const dataSources: DataSourceOption[] = useMemo(() => {
     return (
-      dataSourcesQuery.data?.dataSources.map((ds) => ({
+      dataSourcesQuery.data?.map((ds) => ({
         id: ds.id,
         name: ds.name,
         type: ds.type,

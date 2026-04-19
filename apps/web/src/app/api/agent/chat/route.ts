@@ -15,6 +15,9 @@ import {
   ScratchpadManager,
   LLMError,
   generateSchemaContext,
+  ConversationLog,
+  wrapToolContext,
+  defaultLogDir,
   type AgentDataSource,
   type AgentEvent,
   type Message,
@@ -108,8 +111,8 @@ export const POST = withAuth(async (req, { db, orgId }) => {
   }
 
   // Resolve per-role AI providers from org settings or env var fallback
-  const providers = await resolveAIProviders(db, orgId);
-  if (!providers) {
+  const resolved = await resolveAIProviders(db, orgId);
+  if (!resolved) {
     return NextResponse.json(
       {
         error: 'AI agent is not configured. Add a model under Settings → LLM providers or set the ANTHROPIC_API_KEY environment variable.',
@@ -117,6 +120,7 @@ export const POST = withAuth(async (req, { db, orgId }) => {
       { status: 503 },
     );
   }
+  const { providers, maxTokens: maxTokensPerRole } = resolved;
 
   // Load org's data sources with cached schemas
   const orgSources = await db
@@ -195,6 +199,20 @@ export const POST = withAuth(async (req, { db, orgId }) => {
   // Generate or reuse conversation/session ID
   const sessionId = conversationId ?? `conv_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
 
+  // Passive conversation log — one JSONL per turn. Advisory; failures never
+  // block the response. Consumed later (eval / past-mistakes curation).
+  const convLog = new ConversationLog({
+    sessionId,
+    orgId,
+    userMessage: message,
+    dataSources: agentDataSources.map((d) => ({ id: d.id, name: d.name, type: d.type })),
+  });
+  convLog.snapshotSchemaDocs(agentDataSources);
+  convLog.push({ t: 'user_message', text: message });
+
+  // Wrap the tool context so SQL + schema calls are recorded with inputs.
+  const loggedToolContext = wrapToolContext(toolContext, convLog);
+
   // Reuse existing LeaderAgent for this session, or create a new one.
   // Leaders persist across turns to keep conversation state in-memory.
   let leader: LeaderAgent;
@@ -202,14 +220,18 @@ export const POST = withAuth(async (req, { db, orgId }) => {
   if (cached) {
     leader = cached.leader;
     cached.lastAccess = Date.now();
+    // Rebind the tool context so this turn's conversation log captures
+    // SQL + schema calls made by the cached leader.
+    leader.setToolContext(loggedToolContext);
   } else {
     leader = new LeaderAgent({
       providers,
-      toolContext,
+      toolContext: loggedToolContext,
       dataSources: agentDataSources,
       scratchpadManager,
       maxToolRounds: 25,
       subAgentMaxRounds: 15,
+      maxTokensPerRole,
     });
 
     // Load conversation history from Redis for cold-start recovery
@@ -229,10 +251,10 @@ export const POST = withAuth(async (req, { db, orgId }) => {
 
   console.log(`[Chat] Mode: ${wantsStream ? 'SSE streaming' : 'JSON'}, session=${sessionId}`);
   if (wantsStream) {
-    return handleStreaming(leader, message, orgId, sessionId, sourcesNeedingBootstrap, adminDb, agentDataSources);
+    return handleStreaming(leader, message, orgId, sessionId, sourcesNeedingBootstrap, adminDb, agentDataSources, convLog);
   }
 
-  return handleNonStreaming(leader, message, orgId, sessionId);
+  return handleNonStreaming(leader, message, orgId, sessionId, convLog);
 });
 
 /**
@@ -243,7 +265,9 @@ async function handleNonStreaming(
   message: string,
   orgId: string,
   sessionId: string,
+  convLog: ConversationLog,
 ): Promise<NextResponse> {
+  let stopReason = 'unknown';
   try {
     // Process with timeout
     const events = await collectWithTimeout(leader.chat(message, sessionId), AGENT_TIMEOUT_MS);
@@ -255,6 +279,7 @@ async function handleNonStreaming(
     let queryResult: Record<string, unknown> | null = null;
 
     for (const event of events) {
+      mirrorAgentEventToLog(event, convLog);
       switch (event.type) {
         case 'text':
           text += event.text;
@@ -296,6 +321,9 @@ async function handleNonStreaming(
           }
           break;
         }
+        case 'done':
+          stopReason = event.stopReason;
+          break;
       }
     }
 
@@ -315,26 +343,44 @@ async function handleNonStreaming(
     });
   } catch (err) {
     if (err instanceof LLMError) {
-      if (err.statusCode === 401) {
+      if (err.reason === 'output_tokens_exceeded') {
         return NextResponse.json(
-          { error: 'Invalid API key. Check your AI model configuration in Settings.' },
+          {
+            error: 'Model hit its output-token ceiling. Raise max_tokens for the affected agent role in Settings → LLM providers.',
+            reason: err.reason,
+          },
+          { status: 400 },
+        );
+      }
+      if (err.reason === 'context_length_exceeded') {
+        return NextResponse.json(
+          {
+            error: 'The request is larger than the model can read. Try a shorter question or trim the schema doc.',
+            reason: err.reason,
+          },
+          { status: 400 },
+        );
+      }
+      if (err.statusCode === 401 || err.reason === 'auth') {
+        return NextResponse.json(
+          { error: 'Invalid API key. Check your AI model configuration in Settings.', reason: err.reason },
           { status: 401 },
         );
       }
-      if (err.statusCode === 429) {
+      if (err.statusCode === 429 || err.reason === 'rate_limited') {
         return NextResponse.json(
-          { error: 'AI service is busy, please retry in a moment.' },
+          { error: 'AI service is busy, please retry in a moment.', reason: err.reason },
           { status: 429 },
         );
       }
-      if (err.statusCode && err.statusCode >= 500) {
+      if ((err.statusCode && err.statusCode >= 500) || err.reason === 'server_error') {
         return NextResponse.json(
-          { error: 'AI service is temporarily unavailable.' },
+          { error: 'AI service is temporarily unavailable.', reason: err.reason },
           { status: 502 },
         );
       }
       return NextResponse.json(
-        { error: `AI provider error: ${err.message}` },
+        { error: `AI provider error: ${err.message}`, reason: err.reason },
         { status: err.statusCode ?? 500 },
       );
     }
@@ -357,6 +403,61 @@ async function handleNonStreaming(
       { error: `Agent error: ${err instanceof Error ? err.message : String(err)}` },
       { status: 500 },
     );
+  } finally {
+    // Fire-and-forget flush so slow disk I/O can't delay the response.
+    void convLog.flush(defaultLogDir(), stopReason);
+  }
+}
+
+/**
+ * Mirror an agent event into the conversation log. Side-by-side with the SSE
+ * wire emission — the log captures what we'd need to debug, not what the UI
+ * renders.
+ */
+function mirrorAgentEventToLog(event: AgentEvent, log: ConversationLog): void {
+  switch (event.type) {
+    case 'text':
+      // Accumulate a short preview per chunk; avoids flooding the log with
+      // per-token events but still shows what the model emitted.
+      log.push({
+        t: 'agent_text',
+        preview: event.text.slice(0, 200),
+        chars: event.text.length,
+      });
+      break;
+    case 'thinking':
+      log.push({ t: 'thinking', text: event.text.slice(0, 500) });
+      break;
+    case 'agent_start':
+      log.push({ t: 'agent_turn_start', agent: event.agent, task: event.task });
+      break;
+    case 'agent_end':
+      log.push({ t: 'agent_turn_end', agent: event.agent, summary: event.summary });
+      break;
+    case 'task_dispatched':
+      log.push({
+        t: 'task_dispatched',
+        task_id: event.taskId,
+        agent: event.agent,
+        instruction: event.instruction,
+      });
+      break;
+    case 'task_complete':
+      log.push({
+        t: 'task_complete',
+        task_id: event.taskId,
+        agent: event.agent,
+        summary: event.summary,
+        is_error: event.isError,
+      });
+      break;
+    case 'task_cancelled':
+      log.push({ t: 'task_cancelled', task_id: event.taskId });
+      break;
+    // tool_start/tool_end already captured by wrapToolContext at execution
+    // boundary; skip here to avoid duplicates.
+    default:
+      break;
   }
 }
 
@@ -371,12 +472,14 @@ function handleStreaming(
   sourcesNeedingBootstrap: Array<{ id: string; name: string; config: unknown }>,
   adminDb: ReturnType<typeof getAdminDb>,
   agentDataSources: AgentDataSource[],
+  convLog: ConversationLog,
 ): Response {
   const encoder = new TextEncoder();
   const abort = new AbortController();
 
   const stream = new ReadableStream({
     async start(controller) {
+      let streamStopReason = 'unknown';
       const enqueue = (event: string, data: Record<string, unknown>) => {
         if (abort.signal.aborted) return;
         try {
@@ -452,6 +555,7 @@ function handleStreaming(
               console.log('[Chat] Agent processing aborted — client disconnected');
               return;
             }
+            mirrorAgentEventToLog(event, convLog);
             switch (event.type) {
               case 'text':
                 enqueue('text', { text: event.text });
@@ -542,6 +646,7 @@ function handleStreaming(
                 const history = leader.getHistory();
                 await saveConversation(orgId, sessionId, history);
                 enqueue('done', { stopReason: event.stopReason, conversationId: sessionId });
+                streamStopReason = event.stopReason;
                 break;
               }
             }
@@ -554,16 +659,43 @@ function handleStreaming(
         await Promise.race([processStream(), abortPromise]);
       } catch (err) {
         if (!abort.signal.aborted) {
-          const errorMessage = err instanceof LLMError
-            ? (err.statusCode === 429 ? 'AI service is busy, please retry.' : 'AI service error.')
-            : (err instanceof Error ? err.message : String(err));
-          enqueue('error', { error: errorMessage });
+          let errorMessage: string;
+          let errorReason: string | undefined;
+          if (err instanceof LLMError) {
+            errorReason = err.reason;
+            switch (err.reason) {
+              case 'output_tokens_exceeded':
+                errorMessage = 'Model hit its output-token ceiling. Raise max_tokens for the affected agent role in Settings → LLM providers.';
+                break;
+              case 'context_length_exceeded':
+                errorMessage = 'The request is larger than the model can read. Try a shorter question or trim the schema doc.';
+                break;
+              case 'auth':
+                errorMessage = 'Invalid API key. Check your AI model configuration in Settings.';
+                break;
+              case 'rate_limited':
+                errorMessage = 'AI service is busy, please retry.';
+                break;
+              case 'server_error':
+                errorMessage = 'AI service is temporarily unavailable.';
+                break;
+              default:
+                errorMessage = err.message || 'AI service error.';
+            }
+          } else {
+            errorMessage = err instanceof Error ? err.message : String(err);
+          }
+          enqueue('error', errorReason ? { error: errorMessage, reason: errorReason } : { error: errorMessage });
+          streamStopReason = errorReason ? `error:${errorReason}` : 'error';
         } else {
           console.log(`[Chat] Stream ended — client disconnected (session=${sessionId})`);
+          streamStopReason = 'client_disconnect';
         }
       } finally {
         clearInterval(heartbeat);
         try { controller.close(); } catch { /* already closed */ }
+        // Fire-and-forget log flush.
+        void convLog.flush(defaultLogDir(), streamStopReason);
       }
     },
     cancel() {

@@ -17,7 +17,7 @@ import { useDataSources } from './use-data-sources';
  */
 export function DataSourcesSection() {
   const t = useTranslations('settings.dataSources');
-  const { sources, loading, deletingId, refetch, remove } = useDataSources();
+  const { sources, loading, deletingId, deleteError, clearDeleteError, refetch, remove } = useDataSources();
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   function handleCreated() {
@@ -50,7 +50,26 @@ export function DataSourcesSection() {
             </div>
           </div>
         ) : (
-          <DataSourcesList sources={sources} deletingId={deletingId} onDelete={remove} />
+          <>
+            {deleteError && (
+              <div
+                role="alert"
+                className="mb-4 flex items-start justify-between gap-4 rounded-[8px] border border-[var(--danger-border)] bg-[var(--danger-bg)] px-3.5 py-2.5 text-[12.5px] text-[var(--danger-ink)]"
+                style={{ fontFamily: 'var(--font-body)' }}
+              >
+                <span>{t('deleteFailed', { message: deleteError.message })}</span>
+                <button
+                  type="button"
+                  onClick={clearDeleteError}
+                  className="text-[11px] uppercase tracking-[0.1em] text-[var(--danger-ink)] opacity-70 hover:opacity-100"
+                  style={{ fontFamily: 'var(--font-mono)' }}
+                >
+                  {t('dismiss')}
+                </button>
+              </div>
+            )}
+            <DataSourcesList sources={sources} deletingId={deletingId} onDelete={remove} />
+          </>
         )}
       </SettingsPage>
       {drawerOpen && (

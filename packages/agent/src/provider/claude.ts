@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { ChatOptions, LLMProvider, Message, StreamEvent, ToolDefinition } from './types';
+import type { ChatOptions, LLMErrorReason, LLMProvider, Message, StreamEvent, ToolDefinition } from './types';
 import { LLMError } from './types';
+import { DEFAULT_MAX_OUTPUT_TOKENS } from './constants';
 
 /** Configuration for the Claude provider. */
 export interface ClaudeProviderConfig {
@@ -22,7 +23,7 @@ export class ClaudeProvider implements LLMProvider {
   constructor(config: ClaudeProviderConfig) {
     this.client = new Anthropic({ apiKey: config.apiKey });
     this.defaultModel = config.model ?? 'claude-sonnet-4-20250514';
-    this.defaultMaxTokens = config.maxTokens ?? 4096;
+    this.defaultMaxTokens = config.maxTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
   }
 
   /** Stream a chat response from Claude with tool use. */
@@ -56,6 +57,9 @@ export class ClaudeProvider implements LLMProvider {
       let activeToolId = '';
       let activeToolName = '';
       let activeToolInput = '';
+      // stop_reason arrives on `message_delta`, not `message_stop`; hold it
+      // so we can surface it in the final message_end event.
+      let finalStopReason = 'end_turn';
 
       for await (const event of stream) {
         switch (event.type) {
@@ -105,18 +109,39 @@ export class ClaudeProvider implements LLMProvider {
             }
             break;
 
+          case 'message_delta':
+            if (event.delta?.stop_reason) {
+              finalStopReason = event.delta.stop_reason;
+            }
+            break;
+
           case 'message_stop':
-            yield { type: 'message_end' as const, stopReason: 'end_turn' };
+            if (finalStopReason === 'max_tokens') {
+              // Surface truncated output as a structured error so callers
+              // (chat route, UI) can render an actionable message. The
+              // stream has already delivered the (partial) text/tool data,
+              // so this fires only after content has been yielded.
+              throw new LLMError(
+                `Output truncated at max_tokens=${options?.maxTokens ?? this.defaultMaxTokens}. Raise the model's max_tokens setting for this agent role.`,
+                'claude',
+                undefined,
+                false,
+                'output_tokens_exceeded',
+              );
+            }
+            yield { type: 'message_end' as const, stopReason: finalStopReason };
             break;
         }
       }
     } catch (err) {
+      if (err instanceof LLMError) throw err;
       if (err instanceof Anthropic.APIError) {
         throw new LLMError(
           err.message,
           'claude',
           err.status,
           err.status === 429 || err.status >= 500,
+          classifyClaudeError(err),
         );
       }
       throw err;
@@ -167,4 +192,22 @@ export class ClaudeProvider implements LLMProvider {
     return result;
   }
 
+}
+
+/**
+ * Map an Anthropic SDK error to a structured {@link LLMErrorReason}. Keeps
+ * pattern-matching in one place so the provider class stays readable.
+ */
+function classifyClaudeError(err: InstanceType<typeof Anthropic.APIError>): LLMErrorReason {
+  const msg = (err.message ?? '').toLowerCase();
+  if (err.status === 401 || err.status === 403) return 'auth';
+  if (err.status === 429) return 'rate_limited';
+  if (typeof err.status === 'number' && err.status >= 500) return 'server_error';
+  if (msg.includes('max_tokens') || msg.includes('output tokens')) return 'output_tokens_exceeded';
+  if (msg.includes('context') && (msg.includes('length') || msg.includes('window'))) {
+    return 'context_length_exceeded';
+  }
+  if (msg.includes('prompt is too long')) return 'context_length_exceeded';
+  if (err.status === 400) return 'invalid_request';
+  return 'unknown';
 }

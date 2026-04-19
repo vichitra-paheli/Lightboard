@@ -60,6 +60,13 @@ export interface SubAgentConfig {
   /** Maximum tool call rounds before giving up (default varies by agent). */
   maxToolRounds?: number;
   /**
+   * Output-token ceiling for this agent's LLM calls. When set, the agent
+   * passes it explicitly in `ChatOptions.maxTokens` on every turn. When unset,
+   * the provider's stored default is used. Prefer setting explicitly so the
+   * per-role routing in `agent_role_assignments` actually takes effect.
+   */
+  maxTokens?: number;
+  /**
    * Optional progress callback. Sub-agents invoke this with short, human-
    * readable status strings ("Running query: SELECT ...", "Got 1250 rows")
    * so the leader can surface task_progress events to the UI during long
