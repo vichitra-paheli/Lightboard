@@ -56,8 +56,8 @@ docker compose up -d
 # Copy environment variables
 cp .env.example apps/web/.env.local
 
-# Push database schema
-pnpm --filter @lightboard/db db:push
+# Apply database migrations
+pnpm --filter @lightboard/db db:migrate
 
 # Seed demo data (optional)
 pnpm --filter @lightboard/db db:seed
@@ -92,11 +92,12 @@ pnpm format       # Auto-format all files
 ### Per-package commands
 
 ```bash
-pnpm --filter @lightboard/web dev         # Web app only
-pnpm --filter @lightboard/db db:push      # Push schema to DB
-pnpm --filter @lightboard/db db:generate  # Generate migrations
-pnpm --filter @lightboard/db db:seed      # Seed demo data
-pnpm --filter @lightboard/db db:studio    # Open Drizzle Studio
+pnpm --filter @lightboard/web dev            # Web app only
+pnpm --filter @lightboard/db db:migrate      # Apply pending migrations
+pnpm --filter @lightboard/db db:bootstrap    # Backfill tracking for DBs seeded by the old db:push flow
+pnpm --filter @lightboard/db db:generate     # Generate migration from schema changes
+pnpm --filter @lightboard/db db:seed         # Seed demo data
+pnpm --filter @lightboard/db db:studio       # Open Drizzle Studio
 ```
 
 ## Multi-tenancy
