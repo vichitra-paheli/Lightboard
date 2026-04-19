@@ -1,18 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-
-/**
- * Shape returned by `GET /api/auth/me`. Kept local to the component — the
- * server route returns a slightly broader user shape, but only these fields
- * are rendered in the top bar.
- */
-interface MeResponse {
-  user?: {
-    name?: string | null;
-    email?: string | null;
-  };
-}
+import { useCurrentUser } from '@/lib/use-current-user';
 
 /**
  * Pick the initial to display in the gradient dot. Prefers the first
@@ -43,37 +31,17 @@ function deriveLabel(name?: string | null, email?: string | null): string {
  * Right-column avatar chip in the top bar. Renders a gradient dot with the
  * user's initial plus the username in small mono-free body text.
  *
- * Data source: `GET /api/auth/me` is fetched once on mount via plain
- * `fetch` — the app doesn't wire `@tanstack/react-query` yet. TODO (PR 8):
- * migrate to react-query so the avatar shares a cached user object with
- * future settings/profile surfaces.
+ * Data source: `GET /api/auth/me` via the shared {@link useCurrentUser}
+ * react-query hook. The query is keyed on `['auth', 'me']` and cached for
+ * 5 minutes, so the avatar and other surfaces (UserMessage) share one
+ * fetch per session.
  */
 export function UserAvatar() {
-  const [label, setLabel] = useState('User');
-  const [initial, setInitial] = useState('U');
-
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        const res = await fetch('/api/auth/me', { cache: 'no-store' });
-        if (!res.ok) return;
-        const data = (await res.json()) as MeResponse;
-        if (cancelled) return;
-        const name = data.user?.name ?? null;
-        const email = data.user?.email ?? null;
-        setLabel(deriveLabel(name, email));
-        setInitial(deriveInitial(name, email));
-      } catch {
-        // Swallow errors — the placeholder "User"/"U" stays on screen, which
-        // is the correct UX for an unauthenticated or offline state.
-      }
-    }
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { data } = useCurrentUser();
+  const name = data?.name ?? null;
+  const email = data?.email ?? null;
+  const label = deriveLabel(name, email);
+  const initial = deriveInitial(name, email);
 
   return (
     <div className="inline-flex items-center gap-[10px] rounded-full border border-[var(--line-1)] py-1 pl-1 pr-[10px]">

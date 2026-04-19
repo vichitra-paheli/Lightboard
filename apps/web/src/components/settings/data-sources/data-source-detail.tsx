@@ -1,10 +1,12 @@
 'use client';
 
+import { useQuery } from '@tanstack/react-query';
 import { useTranslations } from 'next-intl';
-import { useEffect, useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import { LightboardLoader } from '@/components/brand';
 import { SchemaBrowser } from '@/components/data-sources/schema-browser';
+import { queryKeys } from '@/lib/query-keys';
 
 import { PrimaryButton, SecondaryButton, SettingsPage } from '../primitives';
 import { ConnectionTab } from './connection-tab';
@@ -30,61 +32,62 @@ interface SchemaPayload {
   }[];
 }
 
+/** 5 minutes — schema docs rarely change mid-session. */
+const METADATA_STALE_TIME = 5 * 60 * 1000;
+
+/** Fetch all data sources (used by the detail page until we have a single-source GET). */
+async function fetchDataSources(): Promise<DataSourceRow[]> {
+  const res = await fetch('/api/data-sources');
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = (await res.json()) as { dataSources: DataSourceRow[] };
+  return data.dataSources ?? [];
+}
+
+/** Fetch the schema payload for a specific data source id. */
+async function fetchSchema(id: string): Promise<SchemaPayload> {
+  const res = await fetch(`/api/data-sources/${id}/schema`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return (await res.json()) as SchemaPayload;
+}
+
 /**
- * Server-backed detail page. Fetches the source out of the list endpoint
- * (there's no single-source GET yet — follow-up) and its schema lazily
- * when the Schema Doc tab is active.
+ * Server-backed detail page. Pulls the source from the shared data-sources
+ * list cache (same key as the settings list page, so switching between the
+ * list and detail views doesn't trigger a refetch inside the 5 min window)
+ * and lazy-loads its schema when the Schema tab is active.
  */
 export function DataSourceDetail({ id }: DataSourceDetailProps) {
   const t = useTranslations('settings.dataSources.detail');
-  const [source, setSource] = useState<DataSourceRow | null>(null);
-  const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<DetailTabId>('schema');
-  const [schema, setSchema] = useState<SchemaPayload | null>(null);
-  const [schemaLoading, setSchemaLoading] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        const res = await fetch('/api/data-sources');
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = (await res.json()) as { dataSources: DataSourceRow[] };
-        if (cancelled) return;
-        setSource(data.dataSources.find((d) => d.id === id) ?? null);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [id]);
+  const sourcesQuery = useQuery({
+    queryKey: queryKeys.dataSources(),
+    queryFn: fetchDataSources,
+    staleTime: METADATA_STALE_TIME,
+  });
 
-  // Lazy-load schema only when the user opens the Schema tab and the source
-  // actually has documentation / context available.
-  useEffect(() => {
-    if (tab !== 'schema' || !source || schema) return;
-    const { status } = deriveSchemaDocStatus(source.config);
-    if (status === 'empty') return;
-    setSchemaLoading(true);
-    fetch(`/api/data-sources/${id}/schema`)
-      .then((r) => (r.ok ? (r.json() as Promise<SchemaPayload>) : null))
-      .then((data) => {
-        if (data) setSchema(data);
-      })
-      .catch(() => {
-        /* schema fetch is best-effort */
-      })
-      .finally(() => setSchemaLoading(false));
-  }, [id, tab, source, schema]);
+  const source = useMemo(
+    () => sourcesQuery.data?.find((d) => d.id === id) ?? null,
+    [sourcesQuery.data, id],
+  );
 
-  if (loading || !source) {
+  const schemaStatus = source ? deriveSchemaDocStatus(source.config) : null;
+
+  // Only fetch the schema when the Schema tab is active AND the source
+  // actually has a documented schema to surface. `enabled` lets react-query
+  // gate the fetch without forcing a wrapping `useEffect`.
+  const schemaQuery = useQuery({
+    queryKey: queryKeys.dataSourceSchema(id),
+    queryFn: () => fetchSchema(id),
+    staleTime: METADATA_STALE_TIME,
+    enabled: tab === 'schema' && !!source && schemaStatus?.status !== 'empty',
+  });
+
+  if (sourcesQuery.isPending || !source) {
     return (
       <div className="flex flex-col items-center justify-center gap-3 py-20">
         <LightboardLoader size={48} />
-        {!loading && !source && (
+        {!sourcesQuery.isPending && !source && (
           <p className="text-sm text-[var(--ink-3)]">{t('notFound')}</p>
         )}
       </div>
@@ -96,7 +99,7 @@ export function DataSourceDetail({ id }: DataSourceDetailProps) {
   const host = (config.host as string | undefined) ?? '';
   const database = (config.database as string | undefined) ?? '';
   const description = [host, database].filter(Boolean).join(' · ');
-  const schemaStatus = deriveSchemaDocStatus(source.config);
+  const schemaLoading = schemaQuery.isPending && schemaQuery.fetchStatus === 'fetching';
 
   return (
     <SettingsPage
@@ -120,7 +123,7 @@ export function DataSourceDetail({ id }: DataSourceDetailProps) {
       <div className="mt-6">
         {tab === 'schema' && (
           <>
-            {schemaStatus.status === 'empty' ? (
+            {schemaStatus?.status === 'empty' ? (
               <SchemaDocEmpty sourceName={source.name} tableCount={0} />
             ) : schemaLoading ? (
               <div className="flex flex-col items-center justify-center gap-3 py-16">
@@ -129,7 +132,7 @@ export function DataSourceDetail({ id }: DataSourceDetailProps) {
               </div>
             ) : (
               <SchemaBrowser
-                tables={schema?.tables ?? []}
+                tables={schemaQuery.data?.tables ?? []}
                 sourceName={source.name}
                 loading={false}
                 onClose={() => { /* detail keeps the tab */ }}

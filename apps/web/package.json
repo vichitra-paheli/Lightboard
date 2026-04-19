@@ -20,6 +20,8 @@
     "@lightboard/query-ir": "workspace:*",
     "@lightboard/ui": "workspace:*",
     "@lightboard/viz-core": "workspace:*",
+    "@tanstack/react-query": "^5.59.0",
+    "@tanstack/react-query-devtools": "^5.59.0",
     "clsx": "^2.1.1",
     "ioredis": "^5.6.1",
     "lucide-react": "^0.500.0",

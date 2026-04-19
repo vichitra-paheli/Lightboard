@@ -1,9 +1,11 @@
 'use client';
 
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslations } from 'next-intl';
 import { useState } from 'react';
 
 import { LightboardLoader } from '@/components/brand';
+import { queryKeys } from '@/lib/query-keys';
 
 import {
   Drawer,
@@ -16,6 +18,7 @@ import {
   TextInput,
   ToggleRow,
 } from '../primitives';
+import type { DataSourceRow } from './use-data-sources';
 
 /** Connector options surfaced in the Type select. Mirrors the data-sources enum. */
 const CONNECTOR_OPTIONS = [
@@ -42,6 +45,12 @@ export interface DataSourceDrawerProps {
   onCreated: () => void;
 }
 
+/** Snapshot the create mutation takes so `onError` can roll back. */
+interface CreateContext {
+  previous?: DataSourceRow[];
+  tempId?: string;
+}
+
 /** Initial blank state. */
 function blankState(): DrawerFormState {
   return {
@@ -59,32 +68,33 @@ function blankState(): DrawerFormState {
 /** Create-datasource drawer. */
 export function DataSourceDrawer({ onClose, onCreated }: DataSourceDrawerProps) {
   const t = useTranslations('settings.dataSources.drawer');
+  const queryClient = useQueryClient();
   const [form, setForm] = useState<DrawerFormState>(blankState);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  function update(patch: Partial<DrawerFormState>) {
-    setForm((f) => ({ ...f, ...patch }));
-  }
-
-  async function handleSave() {
-    setSaving(true);
-    setError(null);
-    try {
+  /**
+   * Create mutation with optimistic insertion — the new row appears in the
+   * data-sources list immediately under a temp id, then gets swapped for
+   * the server row on success (or removed on error). Once the server returns
+   * the authoritative row the drawer closes via the shared `onCreated`
+   * callback.
+   */
+  const createMutation = useMutation<DataSourceRow, Error, DrawerFormState, CreateContext>({
+    mutationFn: async (f) => {
       const res = await fetch('/api/data-sources', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: form.name,
-          type: form.type,
+          name: f.name,
+          type: f.type,
           connection: {
-            host: form.host,
-            port: form.port,
-            database: form.database,
-            user: form.user,
-            password: form.password,
+            host: f.host,
+            port: f.port,
+            database: f.database,
+            user: f.user,
+            password: f.password,
           },
         }),
       });
@@ -92,12 +102,57 @@ export function DataSourceDrawer({ onClose, onCreated }: DataSourceDrawerProps) 
         const data = (await res.json().catch(() => null)) as { error?: string } | null;
         throw new Error(data?.error ?? `HTTP ${res.status}`);
       }
+      const data = (await res.json()) as { dataSource: DataSourceRow };
+      return data.dataSource;
+    },
+    onMutate: async (f) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.dataSources() });
+      const previous = queryClient.getQueryData<DataSourceRow[]>(queryKeys.dataSources());
+      const tempId = `temp-${Date.now()}`;
+      const optimisticRow: DataSourceRow = {
+        id: tempId,
+        name: f.name,
+        type: f.type,
+        config: {
+          host: f.host,
+          database: f.database,
+        },
+        createdAt: new Date().toISOString(),
+      };
+      queryClient.setQueryData<DataSourceRow[]>(queryKeys.dataSources(), [
+        ...(previous ?? []),
+        optimisticRow,
+      ]);
+      return { previous, tempId };
+    },
+    onError: (err, _vars, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(queryKeys.dataSources(), context.previous);
+      }
+      setError(err.message);
+    },
+    onSuccess: (serverRow, _vars, context) => {
+      const current = queryClient.getQueryData<DataSourceRow[]>(queryKeys.dataSources()) ?? [];
+      if (context?.tempId) {
+        queryClient.setQueryData<DataSourceRow[]>(
+          queryKeys.dataSources(),
+          current.map((s) => (s.id === context.tempId ? serverRow : s)),
+        );
+      }
       onCreated();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSaving(false);
-    }
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.dataSources() });
+    },
+  });
+
+  function update(patch: Partial<DrawerFormState>) {
+    setForm((f) => ({ ...f, ...patch }));
+  }
+
+  function handleSave() {
+    setError(null);
+    createMutation.mutate(form);
   }
 
   async function handleTest() {
@@ -113,6 +168,7 @@ export function DataSourceDrawer({ onClose, onCreated }: DataSourceDrawerProps) 
   }
 
   const canSave = !!(form.name && form.host && form.database && form.user && form.password);
+  const saving = createMutation.isPending;
 
   return (
     <Drawer

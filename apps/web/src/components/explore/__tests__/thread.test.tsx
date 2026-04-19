@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render } from '@testing-library/react';
+import { cleanup } from '@testing-library/react';
+import { renderWithQuery as render } from '@/test-utils/render-with-query';
 import { Thread, groupTurns } from '../thread';
 import type { ChatMessageData } from '../chat-message';
 
