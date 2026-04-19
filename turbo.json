@@ -26,6 +26,9 @@
     },
     "db:migrate": {
       "cache": false
+    },
+    "db:bootstrap": {
+      "cache": false
     }
   }
 }

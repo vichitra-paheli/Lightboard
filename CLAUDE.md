@@ -148,3 +148,32 @@ docker compose -f docker-compose.prod.yml up  # Production single-node
 lightboard plugin pack <name>        # Create .tar.gz on connected machine
 # Copy to /plugins directory, restart or POST /api/admin/plugins/reload
 ```
+
+## Running migrations
+
+Schema changes ship as journaled migrations under `packages/db/drizzle/`.
+`pnpm --filter @lightboard/db db:migrate` is the one true way to evolve
+the schema — `drizzle-kit push` is only for ad-hoc local experimentation
+and must not be used for real schema changes.
+
+```bash
+# Fresh DB (no tables yet) — just migrate.
+pnpm --filter @lightboard/db db:migrate
+
+# Existing dev DB that was last seeded with `drizzle-kit push` (before the
+# journal existed): run bootstrap once to backfill drizzle's tracking
+# table, then migrate as usual.
+pnpm --filter @lightboard/db db:bootstrap
+pnpm --filter @lightboard/db db:migrate
+
+# Add a new migration after editing packages/db/src/schema/*.ts:
+pnpm --filter @lightboard/db db:generate  # produces next NNNN_*.sql + journal entry
+pnpm --filter @lightboard/db db:migrate
+```
+
+`db:bootstrap` is idempotent and safe to run even when not needed — it
+detects which migrations the live DB has already satisfied, closes any
+drizzle-kit-push gaps (missing `telemetry.telemetry_events`, missing
+`model_configs` / `agent_role_assignments`), and inserts matching rows
+into `drizzle.__drizzle_migrations` so the subsequent `db:migrate` call
+skips what's already applied.

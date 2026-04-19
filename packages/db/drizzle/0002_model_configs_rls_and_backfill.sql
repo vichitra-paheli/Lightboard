@@ -1,7 +1,6 @@
--- Multi-config LLM routing: model_configs + agent_role_assignments tables.
+-- Multi-config LLM routing: RLS + backfill for model_configs and
+-- agent_role_assignments (tables themselves are created in 0000).
 --
--- The tables themselves are created by `drizzle-kit push` from the schema
--- files under packages/db/src/schema/{model-configs,agent-role-assignments}.ts.
 -- This migration layers on the org-scoped RLS policies plus a one-time
 -- backfill that turns each org's pre-existing `organizations.ai_credentials`
 -- blob into a "Default" model config routed to all four agent roles.
@@ -10,17 +9,17 @@
 -- RLS — both new tables are org-scoped. Follow the pattern from 0001.
 -- ---------------------------------------------------------------------------
 
-ALTER TABLE model_configs ENABLE ROW LEVEL SECURITY;
-CREATE POLICY model_configs_tenant_isolation ON model_configs
-  USING (org_id = current_setting('app.current_org_id', true)::uuid);
-CREATE POLICY model_configs_tenant_insert ON model_configs
-  FOR INSERT WITH CHECK (org_id = current_setting('app.current_org_id', true)::uuid);
+ALTER TABLE "model_configs" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+CREATE POLICY "model_configs_tenant_isolation" ON "model_configs"
+  USING (org_id = current_setting('app.current_org_id', true)::uuid);--> statement-breakpoint
+CREATE POLICY "model_configs_tenant_insert" ON "model_configs"
+  FOR INSERT WITH CHECK (org_id = current_setting('app.current_org_id', true)::uuid);--> statement-breakpoint
 
-ALTER TABLE agent_role_assignments ENABLE ROW LEVEL SECURITY;
-CREATE POLICY agent_role_assignments_tenant_isolation ON agent_role_assignments
-  USING (org_id = current_setting('app.current_org_id', true)::uuid);
-CREATE POLICY agent_role_assignments_tenant_insert ON agent_role_assignments
-  FOR INSERT WITH CHECK (org_id = current_setting('app.current_org_id', true)::uuid);
+ALTER TABLE "agent_role_assignments" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+CREATE POLICY "agent_role_assignments_tenant_isolation" ON "agent_role_assignments"
+  USING (org_id = current_setting('app.current_org_id', true)::uuid);--> statement-breakpoint
+CREATE POLICY "agent_role_assignments_tenant_insert" ON "agent_role_assignments"
+  FOR INSERT WITH CHECK (org_id = current_setting('app.current_org_id', true)::uuid);--> statement-breakpoint
 
 -- ---------------------------------------------------------------------------
 -- Backfill — for every org with existing ai_credentials, create a Default
