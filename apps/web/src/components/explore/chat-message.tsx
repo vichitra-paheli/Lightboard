@@ -73,16 +73,40 @@ export type ToolCallData = Extract<MessagePart, { kind: 'tool_call' }>;
 export type AgentIndicatorData = Extract<MessagePart, { kind: 'agent_delegation' }>;
 
 /**
+ * Structured KEY TAKEAWAYS block emitted by the leader's `narrate_summary`
+ * tool. The renderer draws three numbered rows (01 / 02 / 03) plus an
+ * optional amber interpretation-note banner when `caveat` is present.
+ *
+ * This is a message-level field rather than a {@link MessagePart} variant
+ * because it is derived from a dedicated `narrate_ready` SSE event that
+ * appears strictly once per assistant turn and renders below the whole
+ * parts[] sequence — not interleaved with other parts.
+ */
+export interface NarrationBlock {
+  bullets: Array<{
+    rank: 1 | 2 | 3;
+    headline: string;
+    value?: string;
+    body: string;
+  }>;
+  caveat?: string;
+}
+
+/**
  * A single message in the chat. Assistants carry an ordered `parts[]` that
  * the SSE reducer appends to as events arrive. User messages always carry
  * a single `{ kind: 'text' }` part — we keep them in the same shape so the
  * rendering layer doesn't have to branch on role for every field access.
+ *
+ * `narration`, when present, is the structured KEY TAKEAWAYS block emitted
+ * by the leader's `narrate_summary` tool at the end of a data turn.
  */
 export interface ChatMessageData {
   id: string;
   role: 'user' | 'assistant';
   parts: MessagePart[];
   isStreaming?: boolean;
+  narration?: NarrationBlock;
 }
 
 /**

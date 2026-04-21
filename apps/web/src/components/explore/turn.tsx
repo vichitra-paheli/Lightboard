@@ -4,6 +4,7 @@ import { AssistantStream } from './assistant-stream';
 import { SuggestionChips } from './suggestion-chips';
 import { UserMessage } from './user-message';
 import { getFirstText, type ChatMessageData } from './chat-message';
+import { KeyTakeaways } from './trace/key-takeaways';
 
 /**
  * Props for {@link Turn}.
@@ -72,6 +73,16 @@ export function Turn({
         <AssistantStream
           parts={assistantMessage.parts}
           isStreaming={assistantMessage.isStreaming}
+        />
+      )}
+
+      {/* Terminal narration — rendered below the assistant's stream once
+          the leader calls `narrate_summary`. Distinct from parts[] so it
+          always appears at the bottom of the turn, not interleaved. */}
+      {assistantMessage?.narration && (
+        <KeyTakeaways
+          bullets={assistantMessage.narration.bullets}
+          caveat={assistantMessage.narration.caveat}
         />
       )}
 

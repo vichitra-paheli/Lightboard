@@ -277,6 +277,7 @@ async function handleNonStreaming(
     const toolCalls: { name: string; status: string }[] = [];
     let viewSpec: Record<string, unknown> | null = null;
     let queryResult: Record<string, unknown> | null = null;
+    let narration: { bullets: unknown[]; caveat?: string } | null = null;
 
     for (const event of events) {
       mirrorAgentEventToLog(event, convLog);
@@ -319,6 +320,23 @@ async function handleNonStreaming(
               queryResult = JSON.parse(event.result);
             } catch { /* ignore parse errors */ }
           }
+
+          // Extract narration from narrate_summary so JSON callers (tests,
+          // the MCP pass-through) receive the structured takeaways alongside
+          // the view, mirroring the streaming path's `narrate_ready` event.
+          if (event.name === 'narrate_summary' && !event.isError) {
+            try {
+              const parsed = JSON.parse(event.result);
+              if (Array.isArray(parsed?.bullets)) {
+                narration = {
+                  bullets: parsed.bullets,
+                  ...(typeof parsed.caveat === 'string' && parsed.caveat
+                    ? { caveat: parsed.caveat }
+                    : {}),
+                };
+              }
+            } catch { /* ignore parse errors */ }
+          }
           break;
         }
         case 'done':
@@ -340,6 +358,7 @@ async function handleNonStreaming(
       toolCalls,
       viewSpec,
       queryResult,
+      narration,
     });
   } catch (err) {
     if (err instanceof LLMError) {
@@ -613,6 +632,21 @@ function handleStreaming(
                           }
                         }
                       }
+                    }
+                    // narrate_summary: emit a dedicated `narrate_ready` wire
+                    // event so the UI can render the KEY TAKEAWAYS block
+                    // without re-parsing the tool_end result payload. The
+                    // tool_end row itself still flows through — the
+                    // editorial log wants "NARRATE narrate_summary(3 bullets)
+                    // → 3 bullets 204ms" to appear. If parsing fails we
+                    // silently skip; the tool_end fallback covers it.
+                    if (event.name === 'narrate_summary' && Array.isArray(parsed?.bullets)) {
+                      enqueue('narrate_ready', {
+                        bullets: parsed.bullets,
+                        ...(typeof parsed.caveat === 'string' && parsed.caveat
+                          ? { caveat: parsed.caveat }
+                          : {}),
+                      });
                     }
                   } catch { /* ignore parse errors */ }
                 }

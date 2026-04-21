@@ -23,7 +23,7 @@
  *   stamped with `parentAgent` so the renderer can indent them.
  */
 
-import type { MessagePart } from './chat-message';
+import type { MessagePart, NarrationBlock } from './chat-message';
 import type { ViewSpec } from '@lightboard/viz-core';
 import type { HtmlView } from '@/components/view-renderer';
 
@@ -66,6 +66,12 @@ export type SSEEventShape =
       viewSpec: HtmlView | ViewSpec;
       queryResult?: { rows?: Record<string, unknown>[] };
     }
+  /**
+   * Terminal narration block emitted once per turn. Carries the structured
+   * bullets + optional caveat that the UI renders below the assistant turn.
+   * Unlike `view_created`, this is not a part — it lives on the message.
+   */
+  | { type: 'narrate_ready'; narration: NarrationBlock }
   | { type: 'abort' }
   | { type: 'done' };
 
@@ -353,6 +359,14 @@ export function reduceParts(
       return { parts: [...basePartsForNonStatus, part], ctx };
     }
 
+    case 'narrate_ready': {
+      // Narration lives on the message, not on parts[] — the caller
+      // handles surfacing it. Parts are unchanged. We still strip a
+      // trailing status if one was sitting on the end, matching the
+      // "any real event clears status" contract.
+      return { parts: basePartsForNonStatus, ctx };
+    }
+
     case 'abort': {
       // Flip every running tool_call / agent_delegation to `aborted`.
       const nextParts = parts.map((p) => {
@@ -484,6 +498,37 @@ export function parseSSEJson(
           ? { queryResult: data.queryResult as { rows?: Record<string, unknown>[] } }
           : {}),
       };
+    case 'narrate_ready': {
+      if (!Array.isArray(data.bullets)) return null;
+      // Re-shape defensively — the server validates already, but parsing
+      // here protects against older backends that might drop keys.
+      const bullets: NarrationBlock['bullets'] = [];
+      for (const b of data.bullets) {
+        if (!b || typeof b !== 'object') return null;
+        const obj = b as Record<string, unknown>;
+        const rank = obj.rank;
+        const headline = obj.headline;
+        const body = obj.body;
+        if ((rank !== 1 && rank !== 2 && rank !== 3)
+          || typeof headline !== 'string'
+          || typeof body !== 'string') {
+          return null;
+        }
+        const value = typeof obj.value === 'string' ? obj.value : undefined;
+        bullets.push({
+          rank,
+          headline,
+          body,
+          ...(value ? { value } : {}),
+        });
+      }
+      bullets.sort((a, b) => a.rank - b.rank);
+      const narration: NarrationBlock = {
+        bullets,
+        ...(typeof data.caveat === 'string' && data.caveat ? { caveat: data.caveat } : {}),
+      };
+      return { type: 'narrate_ready', narration };
+    }
     case 'done':
       return { type: 'done' };
     default:
