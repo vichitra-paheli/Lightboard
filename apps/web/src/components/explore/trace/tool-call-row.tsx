@@ -144,9 +144,10 @@ interface ToolCallRowProps {
  * - `error`   — destructive red dot, duration if available.
  * - `aborted` — ink-5 dot, struck-through tool name.
  *
- * When `parentAgent` is set (a sub-agent ran this tool), the row indents
- * 12px and shows a subtle dimmed bracket on the left so nesting reads
- * visually.
+ * All rows in a cluster share the same left alignment. `parentAgent` is
+ * still carried on the part as metadata for future filtering/grouping,
+ * but it no longer produces visual indentation — the cluster panel chrome
+ * already expresses grouping.
  */
 export function ToolCallRow({ part }: ToolCallRowProps) {
   // Prefer the backend-supplied kind; fall back to the name-based map so
@@ -157,7 +158,11 @@ export function ToolCallRow({ part }: ToolCallRowProps) {
   const isRunning = part.status === 'running';
   const isError = part.status === 'error';
   const isAborted = part.status === 'aborted';
-  const isNested = !!part.parentAgent;
+  // `parentAgent` used to drive a 12px indent + dashed left rule for sub-agent
+  // rows. Round-2 feedback: inside a cluster panel every row should sit at
+  // the same x-alignment so kind badges line up. Keep the field available
+  // on MessagePart — it's still useful metadata for filters / debugging —
+  // but don't express it visually here.
 
   // Derive display parts. If the backend supplied a compact `label` use
   // that; otherwise reconstruct from the tool name + args. Long SQL (>100
@@ -197,22 +202,17 @@ export function ToolCallRow({ part }: ToolCallRowProps) {
         gap: 14,
         padding: '6px 0 6px 14px',
         position: 'relative',
-        marginLeft: isNested ? 12 : 0,
-        // Nested rows used to carry a dashed left rule that duplicated the
-        // cluster panel's outer chrome. With the panel in place the inner
-        // rule is visual noise — the 12px indent alone reads as nesting.
-        paddingLeft: 14,
       }}
     >
       {/* Status glyph — 14px rainbow loader while running, hollow kind-colored
           dot when terminal. Absolute-positioned so the size swap doesn't shift
-          sibling content. Visual centers align: 8x8 dot centered at x=2 (top) /
-          x=14 (nested), y=16; 14x14 loader uses left = center - 7, top = 9. */}
+          sibling content. Single alignment for all rows in a cluster — the
+          dot sits flush with the kind badge's left edge. */}
       {isRunning ? (
         <div
           style={{
             position: 'absolute',
-            left: isNested ? 7 : -5,
+            left: -5,
             top: 9,
             width: 14,
             height: 14,
@@ -225,7 +225,7 @@ export function ToolCallRow({ part }: ToolCallRowProps) {
           aria-hidden="true"
           style={{
             position: 'absolute',
-            left: isNested ? 10 : -2,
+            left: -2,
             top: 12,
             width: 8,
             height: 8,

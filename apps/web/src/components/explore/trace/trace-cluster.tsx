@@ -56,11 +56,17 @@ export function TraceCluster({
 
   return (
     <div
-      className="ml-[40px]"
+      className="ml-[40px] overflow-hidden"
+      data-testid="trace-cluster"
       style={{
-        borderTop: '1px dashed var(--line-4, var(--line-2))',
-        borderBottom: '1px dashed var(--line-4, var(--line-2))',
-        padding: '4px 0',
+        // Soft bordered card — matches reference image 15: a quiet
+        // slightly-lifted surface, not a loud tile. `--bg-4` sits one step
+        // above `--bg-0` so the panel reads as its own object without
+        // shouting; `--line-3` is soft enough to stay subordinate to the
+        // chat around it while still giving the shape a clear edge.
+        border: '1px solid var(--line-3)',
+        borderRadius: 10,
+        background: 'var(--bg-4)',
       }}
     >
       <button
@@ -68,8 +74,14 @@ export function TraceCluster({
         onClick={() => setCollapsed((v) => !v)}
         aria-expanded={!collapsed}
         aria-label={collapsed ? 'Expand tool calls' : 'Collapse tool calls'}
-        className="flex w-full items-center gap-3 border-0 bg-transparent px-2 py-2 text-left"
-        style={{ cursor: 'pointer' }}
+        className="flex w-full items-center gap-3 border-0 bg-transparent text-left"
+        style={{
+          cursor: 'pointer',
+          // Header is the clickable area across the whole width. Padding
+          // is on the header itself (not the card) so when collapsed the
+          // whole border-radius clips the click target cleanly.
+          padding: '10px 16px',
+        }}
       >
         {/* Status dot — 8px solid dot; adds a pulsing ring while running. */}
         <span
@@ -153,7 +165,16 @@ export function TraceCluster({
         </span>
       </button>
       {!collapsed && (
-        <div style={{ padding: '2px 2px 6px' }} data-testid="trace-cluster-body">
+        <div
+          data-testid="trace-cluster-body"
+          style={{
+            // Subtle divider between header row and the body — reads as
+            // one card with a clear header/body split rather than two
+            // separate panels stacked.
+            borderTop: '1px solid var(--line-2)',
+            padding: '8px 16px 12px',
+          }}
+        >
           {children}
         </div>
       )}
