@@ -21,6 +21,13 @@ interface TurnProps {
    * disables its siblings.
    */
   activeSuggestion?: string | null;
+  /**
+   * When `true`, suppress this turn's `<UserMessage>` row because the page
+   * header (`<ConversationHeader>`) already prints the same prompt with the
+   * user's avatar on the left. Only meaningful for the turn that matches
+   * the header's first-user-message source.
+   */
+  isFirstTurn?: boolean;
 }
 
 /**
@@ -46,6 +53,7 @@ export function Turn({
   suggestions = [],
   onSuggestionClick,
   activeSuggestion,
+  isFirstTurn = false,
 }: TurnProps) {
   // Prefer suggestions embedded in the assistant's parts[] (PR 7 will wire
   // these from the backend). Fall back to the explicit `suggestions` prop
@@ -66,8 +74,11 @@ export function Turn({
       data-message-id={assistantMessage?.id ?? userMessage.id}
       data-turn-root
     >
-      {/* 1. User prompt */}
-      <UserMessage content={getFirstText(userMessage)} />
+      {/* 1. User prompt. Suppressed on the first turn because the page
+          header (`<ConversationHeader>`) already prints the same text with
+          the user's avatar next to it — rendering it again here would
+          double-print the prompt. */}
+      {!isFirstTurn && <UserMessage content={getFirstText(userMessage)} />}
 
       {assistantMessage && (
         <AssistantStream

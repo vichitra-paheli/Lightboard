@@ -198,8 +198,10 @@ export function ToolCallRow({ part }: ToolCallRowProps) {
         padding: '6px 0 6px 14px',
         position: 'relative',
         marginLeft: isNested ? 12 : 0,
-        borderLeft: isNested ? '1px dashed var(--line-2)' : 'none',
-        paddingLeft: isNested ? 14 : 14,
+        // Nested rows used to carry a dashed left rule that duplicated the
+        // cluster panel's outer chrome. With the panel in place the inner
+        // rule is visual noise — the 12px indent alone reads as nesting.
+        paddingLeft: 14,
       }}
     >
       {/* Status glyph — 14px rainbow loader while running, hollow kind-colored

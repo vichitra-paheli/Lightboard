@@ -189,4 +189,30 @@ describe('<Turn>', () => {
     expect(container.textContent).not.toContain('Key takeaways');
     expect(container.textContent).not.toContain('Interpretation note');
   });
+
+  it('suppresses the <UserMessage> row when isFirstTurn is true', () => {
+    // The ConversationHeader already renders the first user message with
+    // the user's avatar on its left — the first Turn must not render the
+    // same text a second time as a separate UserMessage block.
+    const assistant: ChatMessageData = {
+      id: 'a',
+      role: 'assistant',
+      parts: [{ kind: 'text', text: 'Here you go' }],
+    };
+    const { container } = render(
+      <Turn
+        userMessage={USER}
+        assistantMessage={assistant}
+        isFirstTurn
+      />,
+    );
+    const turnRoot = container.firstElementChild!;
+    // Without UserMessage the only top-level child is the AssistantStream.
+    // (KeyTakeaways + SuggestionChips aren't rendered here — no narration,
+    // no suggestions.)
+    expect(turnRoot.children.length).toBe(1);
+    expect(turnRoot.textContent).toContain('Here you go');
+    // The user's question text is NOT inside the Turn — the header owns it.
+    expect(turnRoot.textContent).not.toContain('Show me the top batters');
+  });
 });

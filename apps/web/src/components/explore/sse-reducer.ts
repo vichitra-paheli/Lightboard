@@ -356,7 +356,37 @@ export function reduceParts(
         view: event.viewSpec,
         data,
       };
-      return { parts: [...basePartsForNonStatus, part], ctx };
+      // Dedupe / replace-in-place: the backend can emit `view_created` more
+      // than once for what the user experiences as a single view —
+      //   1. A view-agent's `create_view` tool_end bubbles up AND the
+      //      leader's `delegate_view` / `await_tasks` tool_end also carries
+      //      the same viewSpec, so the route emits twice.
+      //   2. The agent calls `create_view` then `modify_view` on the same
+      //      logical view, emitting two distinct but related spec payloads.
+      //
+      // In both cases the user wants ONE chart block, with the latest spec
+      // winning. Find the last `view` part in parts[] (scanning past trailing
+      // non-view parts so new post-chart text/tool rows don't confuse the
+      // replacement). If no prior view exists in this turn, just append.
+      let priorViewIdx = -1;
+      for (let i = basePartsForNonStatus.length - 1; i >= 0; i -= 1) {
+        if (basePartsForNonStatus[i]!.kind === 'view') {
+          priorViewIdx = i;
+          break;
+        }
+      }
+      if (priorViewIdx === -1) {
+        return { parts: [...basePartsForNonStatus, part], ctx };
+      }
+      // Replace the existing view part with the new spec. Keep the rest of
+      // parts[] (including any text/tool rows that landed between the old
+      // view and now — those belong to the same turn).
+      const replaced = [
+        ...basePartsForNonStatus.slice(0, priorViewIdx),
+        part,
+        ...basePartsForNonStatus.slice(priorViewIdx + 1),
+      ];
+      return { parts: replaced, ctx };
     }
 
     case 'narrate_ready': {

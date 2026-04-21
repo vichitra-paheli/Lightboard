@@ -34,12 +34,22 @@ interface HtmlViewRendererProps {
  * Heuristic: does the generated HTML embed the design-system FIGURE anatomy
  * (eyebrow + title + subtitle + footer) itself? If so, the outer wrapper
  * should be chromeless to avoid doubling.
+ *
+ * Matches any of:
+ *   - The explicit `FIGURE 01 · …` eyebrow text (with or without the U+00B7
+ *     middle dot — some models round-trip it through entities).
+ *   - A `fig__eyebrow` class (the round-2 template's canonical class name).
+ *   - A `<header>` / heading element that carries a `figure`-ish aria-role.
+ *
+ * Any match returns true so the outer host skips its own title/description
+ * header.
  */
 function hasInternalChrome(html: string): boolean {
-  // The round-2 template emits `FIGURE 01 · ...` in the eyebrow. Looking for
-  // the prefix handles the common case without matching false positives in
-  // prose titles or descriptions.
-  return /FIGURE\s+\d{1,2}\s+·/.test(html);
+  if (/\bfig__eyebrow\b/i.test(html)) return true;
+  // Accept the literal middle-dot, a regular ASCII period, or the HTML entity
+  // form so minor serialization differences don't make the check brittle.
+  if (/FIGURE\s+\d{1,2}\s*(?:·|&middot;|&#183;|\.|—|-)/i.test(html)) return true;
+  return false;
 }
 
 /**

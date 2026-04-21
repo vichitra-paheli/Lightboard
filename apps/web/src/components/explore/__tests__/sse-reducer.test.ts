@@ -183,6 +183,34 @@ describe('reduceParts', () => {
     });
   });
 
+  it('Fixture 6b: two view_created events for the same logical view replace, not stack', () => {
+    // The backend can fire `view_created` more than once per view:
+    //   - create_view bubbles up from the view-agent, AND
+    //   - delegate_view / await_tasks also re-emit the same viewSpec.
+    // The UI must render ONE chart block, with the newest spec winning.
+    const firstHtml = {
+      title: 'Top batters',
+      description: 'draft',
+      sql: 'SELECT 1',
+      html: '<html>v1</html>',
+    };
+    const secondHtml = {
+      ...firstHtml,
+      html: '<html>v2 — tweaked after modify_view</html>',
+    };
+    const parts = run([
+      { type: 'view_created', viewSpec: firstHtml },
+      { type: 'view_created', viewSpec: secondHtml },
+    ]);
+
+    // Exactly one view part — the second spec replaced the first.
+    const views = parts.filter((p) => p.kind === 'view');
+    expect(views).toHaveLength(1);
+    expect(
+      (views[0] as Extract<MessagePart, { kind: 'view' }>).view,
+    ).toBe(secondHtml);
+  });
+
   it('Fixture 7: view_created with a legacy ViewSpec picks up rows from prior run_sql', () => {
     // A ViewSpec is anything without an `html` property. Keep it minimal —
     // the reducer doesn't care about the full spec contents.
