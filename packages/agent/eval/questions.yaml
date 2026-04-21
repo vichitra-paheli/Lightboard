@@ -47,3 +47,13 @@
   dataSource: cricket
   expect:
     hasSchemaDoc: true
+
+# Delta chart — tests whether the view agent draws a dashed baseline rule
+# when the metric is a signed gap vs expectation. The reference figure in
+# Lightboard-design/Lightboard Explore.html uses this exact framing.
+- slug: batters-vs-model
+  question: Show me the top 10 IPL batters since 2014 by True Strike Rate, defined as (actual runs minus expected xruns) per 100 balls. Minimum 500 balls faced. Highlight the biggest outlier.
+  dataSource: cricket
+  expect:
+    chart: horizontal_bar
+    hasCaveat: true
