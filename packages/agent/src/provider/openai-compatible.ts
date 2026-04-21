@@ -150,10 +150,25 @@ export class OpenAICompatibleProvider implements LLMProvider {
               const index = tc.index ?? 0;
               const existing = toolCallsByIndex.get(index);
 
+              // Qwen quirks: some Qwen 3.6 35b builds served via Ollama/vLLM emit
+              // tool_calls[N] with id + function.name on every chunk, not just the
+              // first. Naively starting a new tool call each time would corrupt
+              // downstream assembly (duplicate `tool_call_start`, lost arg
+              // fragments, wrong tool_call_id on the tool-result message).
+              // Only start once per index; if the same index shows up again with
+              // id+name, treat any accompanying `arguments` as an append.
               if (tc.id && tc.function?.name) {
-                // First chunk for this tool call — has id and name
-                toolCallsByIndex.set(index, { id: tc.id, name: tc.function.name, args: tc.function.arguments ?? '' });
-                yield { type: 'tool_call_start', id: tc.id, name: tc.function.name };
+                if (!existing) {
+                  // First chunk for this tool call — has id and name
+                  toolCallsByIndex.set(index, { id: tc.id, name: tc.function.name, args: tc.function.arguments ?? '' });
+                  yield { type: 'tool_call_start', id: tc.id, name: tc.function.name };
+                } else if (tc.function.arguments) {
+                  // Quirky duplicate-start chunk carrying a real argument fragment —
+                  // fold it into the existing entry instead of restarting.
+                  existing.args += tc.function.arguments;
+                  yield { type: 'tool_call_delta', id: existing.id, input: tc.function.arguments };
+                }
+                // If it's a pure duplicate (no new arguments), silently drop.
               } else if (tc.function?.arguments && existing) {
                 // Subsequent delta chunks — only have index and argument fragment
                 existing.args += tc.function.arguments;
@@ -185,7 +200,12 @@ export class OpenAICompatibleProvider implements LLMProvider {
               'output_tokens_exceeded',
             );
           }
-        } catch {
+        } catch (err) {
+          // Preserve structured provider errors (e.g. `output_tokens_exceeded`
+          // raised on finish_reason=length) — they're intentional signals, not
+          // SSE parse failures. Anything else is a malformed line and safe to
+          // skip.
+          if (err instanceof LLMError) throw err;
           // Skip malformed SSE lines
         }
       }
