@@ -185,6 +185,51 @@ describe('InsightsAgent', () => {
     expect(results[0]!.success).toBe(true);
   });
 
+  it('fires onEvent with enriched tool_start and tool_end events', async () => {
+    const ctx = mockToolContext();
+    const captured: Array<{ type: string; name: string; kind?: string; label?: string; resultSummary?: string }> = [];
+
+    const agent = new InsightsAgent({
+      provider: mockProvider([
+        [
+          { type: 'tool_call_start', id: 'tc_1', name: 'analyze_data' },
+          {
+            type: 'tool_call_end',
+            id: 'tc_1',
+            name: 'analyze_data',
+            input: { sql: 'SELECT AVG(sales) FROM sales_data', description: 'Average sales' },
+          },
+          { type: 'message_end', stopReason: 'tool_use' },
+        ],
+        [
+          { type: 'text_delta', text: 'Analyzed.' },
+          { type: 'message_end', stopReason: 'end_turn' },
+        ],
+      ]),
+      toolRouter: new ToolRouter(ctx, insightsTools),
+      onEvent: (event) => {
+        captured.push({
+          type: event.type,
+          name: event.name,
+          ...('kind' in event ? { kind: event.kind } : {}),
+          ...('label' in event ? { label: event.label } : {}),
+          ...('resultSummary' in event ? { resultSummary: event.resultSummary } : {}),
+        });
+      },
+    });
+
+    await agent.run(createInsightsTask());
+
+    const startEvent = captured.find((e) => e.type === 'tool_start');
+    const endEvent = captured.find((e) => e.type === 'tool_end');
+
+    expect(startEvent?.kind).toBe('COMPUTE');
+    expect(endEvent?.kind).toBe('COMPUTE');
+    expect(endEvent?.label).toBe('analyze_data(Average sales)');
+    // Default mock returns { rows: [...], rowCount: 2 } → → 2 rows
+    expect(endEvent?.resultSummary).toBe('→ 2 rows');
+  });
+
   it('returns failure when max rounds exceeded without final text', async () => {
     // Provider always makes tool calls, never returns text
     const infiniteToolProvider: LLMProvider = {

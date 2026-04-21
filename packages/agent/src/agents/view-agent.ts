@@ -1,3 +1,4 @@
+import { classifyTool, formatEnd, formatStart } from '../events/tool-event-formatter';
 import type { Message, ToolCallResult } from '../provider/types';
 import { buildViewPrompt } from '../prompt/view-prompt';
 import { viewTools } from '../tools/view-tools';
@@ -55,6 +56,12 @@ export class ViewAgent implements SubAgent {
             hasToolCalls = true;
             toolInputBuffers.set(event.id, '');
             toolCalls.push({ id: event.id, name: event.name, input: {} });
+            this.config.onEvent?.({
+              type: 'tool_start',
+              name: event.name,
+              id: event.id,
+              kind: classifyTool(event.name),
+            });
             break;
           case 'tool_call_delta':
             toolInputBuffers.set(event.id, (toolInputBuffers.get(event.id) ?? '') + event.input);
@@ -107,11 +114,26 @@ export class ViewAgent implements SubAgent {
           );
         }
 
+        const { kind, label } = formatStart(tc.name, tc.input);
+        const startMs = performance.now();
         const result = await this.config.toolRouter.execute(tc.name, tc.input);
+        const durationMs = Math.max(0, Math.round(performance.now() - startMs));
+        const { resultSummary } = formatEnd(tc.name, result.content, result.isError, durationMs);
         toolResults.push({
           toolCallId: tc.id,
           content: result.content,
           isError: result.isError,
+        });
+
+        this.config.onEvent?.({
+          type: 'tool_end',
+          name: tc.name,
+          result: result.content,
+          isError: result.isError,
+          kind,
+          label,
+          durationMs,
+          ...(resultSummary !== undefined ? { resultSummary } : {}),
         });
 
         // Capture the view data from create_view or modify_view results

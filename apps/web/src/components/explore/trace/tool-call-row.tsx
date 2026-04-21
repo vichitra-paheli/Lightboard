@@ -23,6 +23,10 @@ const KIND_COLOR: Record<string, string> = {
  * Map a tool name to a semantic kind for coloring. Keep this pure/local —
  * no runtime data-source lookups. New tools can be added here as the
  * backend grows.
+ *
+ * This remains the fallback path. When the backend supplies `part.toolKind`,
+ * the renderer prefers it (the backend's classifier is the source of truth;
+ * this function exists so stale bundles still color rows sensibly).
  */
 function kindFor(name: string): keyof typeof KIND_COLOR {
   if (name === 'get_schema' || name === 'describe_table' || name === 'introspect_schema') {
@@ -31,8 +35,22 @@ function kindFor(name: string): keyof typeof KIND_COLOR {
   if (name === 'run_sql' || name === 'execute_query') return 'query';
   if (name === 'create_view' || name === 'modify_view') return 'viz';
   if (name === 'apply_filter') return 'filter';
-  if (name === 'summarize' || name === 'caveat') return 'narrate';
+  if (name === 'summarize' || name === 'caveat' || name === 'narrate_summary') {
+    return 'narrate';
+  }
   return 'compute';
+}
+
+/**
+ * Normalize a `ToolKind` (uppercase, from the backend) to the lowercase key
+ * the `KIND_COLOR` map expects. Tolerates unknown values by returning
+ * `null` so the caller can fall back to the name-based classifier.
+ */
+function kindFromBackend(kind: string | undefined): keyof typeof KIND_COLOR | null {
+  if (!kind) return null;
+  const k = kind.toLowerCase();
+  if (k in KIND_COLOR) return k as keyof typeof KIND_COLOR;
+  return null;
 }
 
 /**
@@ -91,6 +109,23 @@ function formatDuration(ms: number): string {
 }
 
 /**
+ * Split a backend-supplied label like `sql(SELECT batter, SUM(runs)…)`
+ * into `{ name: 'sql', args: 'SELECT batter, SUM(runs)…' }`. Preserves the
+ * existing two-tone rendering (name in ink-1, parens in ink-5). Returns
+ * null when the label doesn't match the expected shape.
+ */
+function parseToolLabel(label: string): { name: string; args: string } | null {
+  // Find the first `(` and match its closing `)` at the very end.
+  const openIdx = label.indexOf('(');
+  if (openIdx <= 0) return null;
+  if (!label.endsWith(')')) return null;
+  return {
+    name: label.slice(0, openIdx),
+    args: label.slice(openIdx + 1, -1),
+  };
+}
+
+/**
  * Props for {@link ToolCallRow}.
  */
 interface ToolCallRowProps {
@@ -114,19 +149,37 @@ interface ToolCallRowProps {
  * visually.
  */
 export function ToolCallRow({ part }: ToolCallRowProps) {
-  const kind = kindFor(part.name);
+  // Prefer the backend-supplied kind; fall back to the name-based map so
+  // stale bundles still render sensibly. Lower-cased because CSS tokens
+  // are keyed in lowercase while the backend emits uppercase `ToolKind`.
+  const kind = kindFromBackend(part.toolKind) ?? kindFor(part.name);
   const kindColor = KIND_COLOR[kind];
   const isRunning = part.status === 'running';
   const isError = part.status === 'error';
   const isAborted = part.status === 'aborted';
   const isNested = !!part.parentAgent;
 
-  // Derive display parts. Long SQL (>100 chars) renders in an expandable
-  // details block so single-line rows stay readable.
+  // Derive display parts. If the backend supplied a compact `label` use
+  // that; otherwise reconstruct from the tool name + args. Long SQL (>100
+  // chars) renders in an expandable details block so single-line rows stay
+  // readable.
   const raw = displayInput(part.input);
   const isLong = raw.length > 100;
   const inlineArgs = isLong ? truncateArgs(raw) : raw;
-  const rows = rowsFromResult(part.result);
+  // Parse the backend-supplied `tool(args)` label into its components so we
+  // can keep the existing two-tone rendering (`name` in ink-1, parens in
+  // ink-5, args in default) without changing the DOM shape.
+  const parsedLabel = part.label ? parseToolLabel(part.label) : null;
+  const displayName = parsedLabel?.name ?? part.name;
+  const displayArgs = parsedLabel?.args ?? inlineArgs;
+
+  // Result-summary precedence:
+  //   1) backend-supplied `part.resultSummary` (`→ 412 rows`, `→ view created`)
+  //   2) locally-derived `→ N rows` from a parseable run_sql result
+  //   3) null — no suffix rendered
+  const localRows = rowsFromResult(part.result);
+  const summary = part.resultSummary
+    ?? (localRows != null ? `→ ${localRows} rows` : null);
 
   const dotBackground = isRunning ? 'var(--bg-0)' : 'var(--bg-0)';
   const dotBorderColor = isError
@@ -196,7 +249,7 @@ export function ToolCallRow({ part }: ToolCallRowProps) {
       >
         {kind}
       </div>
-      {/* Middle: tool(args) → rows */}
+      {/* Middle: tool(args) → summary */}
       <div
         style={{
           fontFamily: 'var(--font-mono), JetBrains Mono, ui-monospace, monospace',
@@ -213,14 +266,14 @@ export function ToolCallRow({ part }: ToolCallRowProps) {
             textDecoration: isAborted ? 'line-through' : 'none',
           }}
         >
-          {part.name}
+          {displayName}
         </span>
         <span style={{ color: 'var(--ink-5)' }}>(</span>
-        <span>{inlineArgs}</span>
+        <span>{displayArgs}</span>
         <span style={{ color: 'var(--ink-5)' }}>)</span>
-        {rows != null && (
+        {summary && (
           <span style={{ color: 'var(--ink-4)', marginLeft: 8 }}>
-            → {rows} rows
+            {summary}
           </span>
         )}
       </div>

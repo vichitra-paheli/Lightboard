@@ -291,6 +291,56 @@ describe('QueryAgent', () => {
     expect(capturedSystem).toContain('pg-main');
   });
 
+  it('fires onEvent with enriched tool_start and tool_end events', async () => {
+    const ctx = mockToolContext();
+    const captured: Array<{ type: string; name: string; kind?: string; label?: string; resultSummary?: string; durationMs?: number }> = [];
+
+    const agent = new QueryAgent({
+      provider: mockProvider([
+        [
+          { type: 'tool_call_start', id: 'tc_1', name: 'run_sql' },
+          {
+            type: 'tool_call_end',
+            id: 'tc_1',
+            name: 'run_sql',
+            input: { source_id: 'pg-main', sql: 'SELECT region FROM orders' },
+          },
+          { type: 'message_end', stopReason: 'tool_use' },
+        ],
+        [
+          { type: 'text_delta', text: 'Done.' },
+          { type: 'message_end', stopReason: 'end_turn' },
+        ],
+      ]),
+      toolRouter: new ToolRouter(ctx),
+      onEvent: (event) => {
+        captured.push({
+          type: event.type,
+          name: event.name,
+          ...('kind' in event ? { kind: event.kind } : {}),
+          ...('label' in event ? { label: event.label } : {}),
+          ...('resultSummary' in event ? { resultSummary: event.resultSummary } : {}),
+          ...('durationMs' in event ? { durationMs: event.durationMs } : {}),
+        });
+      },
+    });
+
+    await agent.run(makeTask('Get region data'));
+
+    const startEvent = captured.find((e) => e.type === 'tool_start');
+    const endEvent = captured.find((e) => e.type === 'tool_end');
+
+    expect(startEvent).toBeDefined();
+    expect(startEvent?.kind).toBe('QUERY');
+
+    expect(endEvent).toBeDefined();
+    expect(endEvent?.kind).toBe('QUERY');
+    expect(endEvent?.label).toMatch(/^sql\(SELECT region/);
+    expect(typeof endEvent?.durationMs).toBe('number');
+    // Mocked runSQL returns 2 rows in the default context.
+    expect(endEvent?.resultSummary).toBe('→ 2 rows');
+  });
+
   it('only passes query tools to the LLM', async () => {
     let capturedTools: unknown;
 

@@ -36,13 +36,28 @@ export type SSEEventShape =
   | { type: 'thinking'; text: string }
   | { type: 'text'; text: string }
   | { type: 'status'; text: string }
-  | { type: 'tool_start'; name: string; input?: unknown }
+  | {
+      type: 'tool_start';
+      name: string;
+      input?: unknown;
+      /** Backend-supplied `ToolKind` (uppercase string) used for coloring. */
+      kind?: string;
+      /** Backend-supplied compact display label. */
+      label?: string;
+      /** Role of the parent sub-agent, if this tool ran inside one. */
+      parentAgent?: string;
+    }
   | {
       type: 'tool_end';
       name: string;
       result?: string;
       durationMs?: number;
       isError?: boolean;
+      kind?: string;
+      label?: string;
+      /** Terminal suffix like `→ 412 rows`. */
+      resultSummary?: string;
+      parentAgent?: string;
     }
   | { type: 'agent_start'; agent: string; task?: string }
   | { type: 'agent_end'; agent: string; summary?: string }
@@ -155,7 +170,11 @@ export function reduceParts(
     }
 
     case 'tool_start': {
+      // Prefer the backend's explicit parentAgent (sub-agent bubble-up)
+      // over the locally-tracked active-agent stack. The stack only moves
+      // on agent_start/agent_end which don't fire in dispatch mode.
       const parentAgent =
+        event.parentAgent ??
         ctx.activeAgentStack[ctx.activeAgentStack.length - 1];
       const part: MessagePart = {
         kind: 'tool_call',
@@ -163,6 +182,8 @@ export function reduceParts(
         status: 'running',
         ...(event.input !== undefined ? { input: event.input } : {}),
         ...(parentAgent ? { parentAgent } : {}),
+        ...(event.kind !== undefined ? { toolKind: event.kind } : {}),
+        ...(event.label !== undefined ? { label: event.label } : {}),
       };
       const nextCtx: ReducerContext = {
         ...ctx,
@@ -237,6 +258,12 @@ export function reduceParts(
         ...(derivedDuration !== undefined
           ? { durationMs: derivedDuration }
           : {}),
+        // Backend-supplied fields win over whatever was stamped at tool_start
+        // (tool_start only ever has `kind`; label/resultSummary land here).
+        ...(event.kind !== undefined ? { toolKind: event.kind } : {}),
+        ...(event.label !== undefined ? { label: event.label } : {}),
+        ...(event.resultSummary !== undefined ? { resultSummary: event.resultSummary } : {}),
+        ...(event.parentAgent !== undefined ? { parentAgent: event.parentAgent } : {}),
       };
       const nextParts = [
         ...basePartsForNonStatus.slice(0, matchIndex),
@@ -415,6 +442,9 @@ export function parseSSEJson(
         type: 'tool_start',
         name: data.name,
         ...(data.input !== undefined ? { input: data.input } : {}),
+        ...(typeof data.kind === 'string' ? { kind: data.kind } : {}),
+        ...(typeof data.label === 'string' ? { label: data.label } : {}),
+        ...(typeof data.parentAgent === 'string' ? { parentAgent: data.parentAgent } : {}),
       };
     case 'tool_end':
       if (typeof data.name !== 'string') return null;
@@ -426,6 +456,10 @@ export function parseSSEJson(
           ? { durationMs: data.durationMs }
           : {}),
         ...(typeof data.isError === 'boolean' ? { isError: data.isError } : {}),
+        ...(typeof data.kind === 'string' ? { kind: data.kind } : {}),
+        ...(typeof data.label === 'string' ? { label: data.label } : {}),
+        ...(typeof data.resultSummary === 'string' ? { resultSummary: data.resultSummary } : {}),
+        ...(typeof data.parentAgent === 'string' ? { parentAgent: data.parentAgent } : {}),
       };
     case 'agent_start':
       if (typeof data.agent !== 'string') return null;

@@ -31,6 +31,16 @@ export type MessagePart =
       result?: string;
       durationMs?: number;
       parentAgent?: string;
+      /**
+       * Backend-supplied semantic kind (uppercase: 'SCHEMA' | 'QUERY' | ...).
+       * When present the editorial trace prefers this over its local
+       * `kindFor` name-based fallback.
+       */
+      toolKind?: string;
+      /** Backend-supplied compact label like `sql(SELECT batter, SUM(runs)…)`. */
+      label?: string;
+      /** Backend-supplied terminal suffix like `→ 412 rows`. */
+      resultSummary?: string;
     }
   | {
       kind: 'agent_delegation';

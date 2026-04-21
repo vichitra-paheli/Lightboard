@@ -1,8 +1,24 @@
+import type { AgentEvent } from '../agent';
 import type { LLMProvider, ToolDefinition } from '../provider/types';
 import type { ToolRouter } from '../tools/router';
 
 /** Roles that sub-agents can take in the multi-agent orchestration. */
 export type SubAgentRole = 'query' | 'view' | 'insights';
+
+/**
+ * Typed event callback fed to sub-agents so their tool calls can bubble up
+ * to the leader's outer stream. The leader passes one in that re-yields
+ * the event after stamping `parentAgent` onto it — letting the editorial
+ * trace render nested `SCHEMA introspect_schema(...)` and
+ * `QUERY sql(...)` rows under a `dispatch_query` parent.
+ *
+ * Kept narrow (tool_start/tool_end only today) because the sub-agents do
+ * not drive text or delegate further themselves — if that ever changes we
+ * can widen this without rewriting callers.
+ */
+export type SubAgentEventCallback = (
+  event: Extract<AgentEvent, { type: 'tool_start' } | { type: 'tool_end' }>,
+) => void;
 
 /**
  * A task assigned by the leader to a sub-agent.
@@ -73,4 +89,11 @@ export interface SubAgentConfig {
    * tool calls. Safe to omit.
    */
   onStatus?: (message: string) => void;
+  /**
+   * Optional typed event callback for bubbling structured tool events
+   * (tool_start / tool_end) up to the leader's outer stream. The leader
+   * re-yields these with `parentAgent: 'query' | 'view' | 'insights'`
+   * stamped on so the trace UI can render nested rows.
+   */
+  onEvent?: SubAgentEventCallback;
 }

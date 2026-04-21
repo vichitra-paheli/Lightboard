@@ -1,3 +1,4 @@
+import { classifyTool, formatEnd, formatStart } from '../events/tool-event-formatter';
 import type { Message, ToolCallResult } from '../provider/types';
 import { buildQueryPrompt } from '../prompt/query-prompt';
 import { queryTools } from '../tools/query-tools';
@@ -60,6 +61,15 @@ export class QueryAgent implements SubAgent {
             hasToolCalls = true;
             toolInputBuffers.set(event.id, '');
             toolCalls.push({ id: event.id, name: event.name, input: {} });
+            // Bubble a minimally-enriched tool_start up to the leader so
+            // the trace UI can render this row with the right color while
+            // args are still streaming. Label arrives on tool_end.
+            this.config.onEvent?.({
+              type: 'tool_start',
+              name: event.name,
+              id: event.id,
+              kind: classifyTool(event.name),
+            });
             break;
           case 'tool_call_delta':
             toolInputBuffers.set(event.id, (toolInputBuffers.get(event.id) ?? '') + event.input);
@@ -103,11 +113,28 @@ export class QueryAgent implements SubAgent {
       const toolResults = [];
       for (const tc of toolCalls) {
         this.emitStatus(describeQueryToolCall(tc.name, tc.input));
+        const { kind, label } = formatStart(tc.name, tc.input);
+        const startMs = performance.now();
         const result = await this.config.toolRouter.execute(tc.name, tc.input);
+        const durationMs = Math.max(0, Math.round(performance.now() - startMs));
+        const { resultSummary } = formatEnd(tc.name, result.content, result.isError, durationMs);
         toolResults.push({
           toolCallId: tc.id,
           content: result.content,
           isError: result.isError,
+        });
+
+        // Bubble the structured tool_end up so the leader's stream can render
+        // the sub-agent's tool calls as nested rows in the trace.
+        this.config.onEvent?.({
+          type: 'tool_end',
+          name: tc.name,
+          result: result.content,
+          isError: result.isError,
+          kind,
+          label,
+          durationMs,
+          ...(resultSummary !== undefined ? { resultSummary } : {}),
         });
 
         if (result.isError) {
