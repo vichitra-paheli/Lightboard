@@ -579,4 +579,218 @@ describe('LeaderAgent', () => {
     leader.reset();
     expect(leader.getHistory()).toHaveLength(0);
   });
+
+  describe('narrate_summary', () => {
+    /** A canonical 3-bullet narrate_summary payload used across these tests. */
+    const validNarratePayload = {
+      bullets: [
+        {
+          rank: 1,
+          headline: 'North region',
+          value: '+12.4%',
+          body: 'North led Q4 growth, well ahead of the pack.',
+        },
+        {
+          rank: 2,
+          headline: 'East region',
+          value: '+4.1%',
+          body: 'East held steady with a modest uptick.',
+        },
+        {
+          rank: 3,
+          headline: 'West region',
+          body: 'West was flat within normal noise.',
+        },
+      ],
+      caveat: 'Sample size of 40 stores; treat with caution.',
+    };
+
+    it('ends the turn with end_turn and enriches tool_end with NARRATE kind', async () => {
+      const leader = new LeaderAgent({
+        provider: mockProvider([
+          [
+            { type: 'tool_call_start', id: 'nt_1', name: 'narrate_summary' },
+            {
+              type: 'tool_call_end',
+              id: 'nt_1',
+              name: 'narrate_summary',
+              input: validNarratePayload,
+            },
+            { type: 'message_end', stopReason: 'tool_use' },
+          ],
+          // This round should never execute — the leader short-circuits after
+          // narrate. If it does run, the fixture stops it harmlessly.
+          [
+            { type: 'text_delta', text: 'extra chatter that should never appear' },
+            { type: 'message_end', stopReason: 'end_turn' },
+          ],
+        ]),
+        toolContext: mockToolContext(),
+        dataSources: [],
+      });
+
+      const events = await collectEvents(leader, 'Summarize the regional breakdown');
+
+      const end = events.find(
+        (e) => e.type === 'tool_end' && e.name === 'narrate_summary',
+      ) as Extract<AgentEvent, { type: 'tool_end' }> | undefined;
+      expect(end).toBeDefined();
+      expect(end?.isError).toBe(false);
+      expect(end?.kind).toBe('NARRATE');
+      expect(typeof end?.durationMs).toBe('number');
+
+      // Result is a valid JSON blob carrying the normalized bullets + caveat.
+      const parsed = JSON.parse(end!.result);
+      expect(Array.isArray(parsed.bullets)).toBe(true);
+      expect(parsed.bullets).toHaveLength(3);
+      expect(parsed.bullets.map((b: { rank: number }) => b.rank)).toEqual([1, 2, 3]);
+      expect(parsed.caveat).toBe('Sample size of 40 stores; treat with caution.');
+      expect(parsed.rendered).toBe(true);
+
+      // Short-circuit must fire: the turn ends with end_turn after narrate,
+      // and no extra text chunk from the unreached fixture round leaks out.
+      const done = events.find(
+        (e) => e.type === 'done',
+      ) as Extract<AgentEvent, { type: 'done' }> | undefined;
+      expect(done?.stopReason).toBe('end_turn');
+
+      const leakedText = events.find(
+        (e) => e.type === 'text' && e.text.includes('extra chatter'),
+      );
+      expect(leakedText).toBeUndefined();
+    });
+
+    it('reports a validation error when the payload has the wrong bullet count', async () => {
+      const leader = new LeaderAgent({
+        provider: mockProvider([
+          [
+            { type: 'tool_call_start', id: 'nt_1', name: 'narrate_summary' },
+            {
+              type: 'tool_call_end',
+              id: 'nt_1',
+              name: 'narrate_summary',
+              input: { bullets: [{ rank: 1, headline: 'only one', body: 'oops' }] },
+            },
+            { type: 'message_end', stopReason: 'tool_use' },
+          ],
+          [
+            { type: 'text_delta', text: 'Let me retry.' },
+            { type: 'message_end', stopReason: 'end_turn' },
+          ],
+        ]),
+        toolContext: mockToolContext(),
+        dataSources: [],
+      });
+
+      const events = await collectEvents(leader, 'summarize');
+      const end = events.find(
+        (e) => e.type === 'tool_end' && e.name === 'narrate_summary',
+      ) as Extract<AgentEvent, { type: 'tool_end' }> | undefined;
+      expect(end?.isError).toBe(true);
+      expect(end?.result).toMatch(/expected exactly 3 bullets/);
+    });
+
+    it('reports a validation error when two bullets share a rank', async () => {
+      const leader = new LeaderAgent({
+        provider: mockProvider([
+          [
+            { type: 'tool_call_start', id: 'nt_1', name: 'narrate_summary' },
+            {
+              type: 'tool_call_end',
+              id: 'nt_1',
+              name: 'narrate_summary',
+              input: {
+                bullets: [
+                  { rank: 1, headline: 'a', body: 'A' },
+                  { rank: 1, headline: 'b', body: 'B' },
+                  { rank: 2, headline: 'c', body: 'C' },
+                ],
+              },
+            },
+            { type: 'message_end', stopReason: 'tool_use' },
+          ],
+          [
+            { type: 'text_delta', text: 'Retrying.' },
+            { type: 'message_end', stopReason: 'end_turn' },
+          ],
+        ]),
+        toolContext: mockToolContext(),
+        dataSources: [],
+      });
+
+      const events = await collectEvents(leader, 'summarize');
+      const end = events.find(
+        (e) => e.type === 'tool_end' && e.name === 'narrate_summary',
+      ) as Extract<AgentEvent, { type: 'tool_end' }> | undefined;
+      expect(end?.isError).toBe(true);
+      expect(end?.result).toMatch(/duplicate rank/);
+    });
+
+    it('reports a validation error when a bullet has an empty body', async () => {
+      const leader = new LeaderAgent({
+        provider: mockProvider([
+          [
+            { type: 'tool_call_start', id: 'nt_1', name: 'narrate_summary' },
+            {
+              type: 'tool_call_end',
+              id: 'nt_1',
+              name: 'narrate_summary',
+              input: {
+                bullets: [
+                  { rank: 1, headline: 'a', body: 'A' },
+                  { rank: 2, headline: 'b', body: '   ' },
+                  { rank: 3, headline: 'c', body: 'C' },
+                ],
+              },
+            },
+            { type: 'message_end', stopReason: 'tool_use' },
+          ],
+          [
+            { type: 'text_delta', text: 'Retrying.' },
+            { type: 'message_end', stopReason: 'end_turn' },
+          ],
+        ]),
+        toolContext: mockToolContext(),
+        dataSources: [],
+      });
+
+      const events = await collectEvents(leader, 'summarize');
+      const end = events.find(
+        (e) => e.type === 'tool_end' && e.name === 'narrate_summary',
+      ) as Extract<AgentEvent, { type: 'tool_end' }> | undefined;
+      expect(end?.isError).toBe(true);
+      expect(end?.result).toMatch(/empty or missing body/);
+    });
+
+    it('continues the leader loop when validation fails (does not short-circuit)', async () => {
+      const leader = new LeaderAgent({
+        provider: mockProvider([
+          [
+            { type: 'tool_call_start', id: 'nt_1', name: 'narrate_summary' },
+            {
+              type: 'tool_call_end',
+              id: 'nt_1',
+              name: 'narrate_summary',
+              input: { bullets: [] },
+            },
+            { type: 'message_end', stopReason: 'tool_use' },
+          ],
+          // After the validation error, the leader should get another turn
+          // and emit this retry text.
+          [
+            { type: 'text_delta', text: 'retry landed' },
+            { type: 'message_end', stopReason: 'end_turn' },
+          ],
+        ]),
+        toolContext: mockToolContext(),
+        dataSources: [],
+      });
+
+      const events = await collectEvents(leader, 'summarize');
+      const retryText = events.find(
+        (e) => e.type === 'text' && e.text === 'retry landed',
+      );
+      expect(retryText).toBeDefined();
+    });
+  });
 });

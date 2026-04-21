@@ -364,4 +364,66 @@ describe('parseSSEJson', () => {
     expect(parseSSEJson('text', '{"notText":1}')).toBeNull();
     expect(parseSSEJson('tool_start', '{}')).toBeNull();
   });
+
+  describe('narrate_ready', () => {
+    const sample = JSON.stringify({
+      bullets: [
+        { rank: 2, headline: 'Second', body: 'mid-pack finding' },
+        { rank: 1, headline: 'First', value: '+11.59', body: 'big one' },
+        { rank: 3, headline: 'Third', body: 'also-ran' },
+      ],
+      caveat: 'Sample of 40.',
+    });
+
+    it('parses into a typed narrate_ready event with bullets sorted by rank', () => {
+      const parsed = parseSSEJson('narrate_ready', sample);
+      expect(parsed).not.toBeNull();
+      if (parsed?.type !== 'narrate_ready') throw new Error('wrong variant');
+      expect(parsed.narration.bullets.map((b) => b.rank)).toEqual([1, 2, 3]);
+      expect(parsed.narration.bullets[0]!.value).toBe('+11.59');
+      expect(parsed.narration.caveat).toBe('Sample of 40.');
+    });
+
+    it('drops payloads where a bullet is missing a required field', () => {
+      const bad = JSON.stringify({
+        bullets: [
+          { rank: 1, body: 'no headline' },
+          { rank: 2, headline: 'Second', body: 'ok' },
+          { rank: 3, headline: 'Third', body: 'ok' },
+        ],
+      });
+      expect(parseSSEJson('narrate_ready', bad)).toBeNull();
+    });
+
+    it('drops payloads where bullets is not an array', () => {
+      expect(parseSSEJson('narrate_ready', '{"bullets":42}')).toBeNull();
+      expect(parseSSEJson('narrate_ready', '{}')).toBeNull();
+    });
+
+    it('omits caveat when the server sent an empty string', () => {
+      const payload = JSON.stringify({
+        bullets: [
+          { rank: 1, headline: 'a', body: 'A' },
+          { rank: 2, headline: 'b', body: 'B' },
+          { rank: 3, headline: 'c', body: 'C' },
+        ],
+        caveat: '',
+      });
+      const parsed = parseSSEJson('narrate_ready', payload);
+      expect(parsed?.type).toBe('narrate_ready');
+      if (parsed?.type !== 'narrate_ready') throw new Error('wrong variant');
+      expect(parsed.narration.caveat).toBeUndefined();
+    });
+
+    it('does not mutate parts[] when reduced', () => {
+      const before: MessagePart[] = [
+        { kind: 'text', text: 'existing text' },
+      ];
+      const parsed = parseSSEJson('narrate_ready', sample);
+      expect(parsed).not.toBeNull();
+      const reducer = createReducer();
+      const after = reducer.apply(parsed!, before);
+      expect(after).toEqual(before);
+    });
+  });
 });
