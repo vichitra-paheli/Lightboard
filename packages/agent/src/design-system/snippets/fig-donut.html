@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* PASTE tokens.css :root block verbatim here. */
+  body { margin:0; background:var(--bg-0); color:var(--ink-1); font-family:var(--font-body); padding:32px 40px; }
+  .fig { max-width:880px; margin:0 auto; }
+  .fig__eyebrow { font-family:var(--font-mono); font-size:var(--text-eyebrow); letter-spacing:var(--track-eyebrow); text-transform:uppercase; color:var(--ink-4); margin-bottom:6px; }
+  .fig__title { font-family:var(--font-display); font-size:var(--text-chart-h); font-weight:600; letter-spacing:var(--track-tight); margin:0; line-height:1.2; }
+  .fig__sub { font-family:var(--font-body); font-size:12.5px; color:var(--ink-3); margin:6px 0 22px; }
+  .fig__body { display:grid; grid-template-columns:240px 1fr; gap:32px; align-items:center; }
+  svg.donut { width:220px; height:220px; }
+  .slice { transform-origin:center; transition:transform var(--dur-chart) var(--ease-draw); transform:scale(0.94); opacity:0.94; }
+  .slice.in { transform:scale(1); opacity:1; }
+  .slice.is-outlier { filter:drop-shadow(0 0 0 1px var(--accent)); }
+  .center-label { font-family:var(--font-mono); font-variant-numeric:tabular-nums; font-size:var(--text-body); fill:var(--ink-2); }
+  .center-val { font-family:var(--font-display); font-size:28px; font-weight:600; fill:var(--ink-1); letter-spacing:var(--track-tight); }
+  .legend { display:flex; flex-direction:column; gap:8px; }
+  .legend__row { display:grid; grid-template-columns:10px 1fr 68px; gap:10px; align-items:center; }
+  .legend__swatch { width:10px; height:10px; border-radius:2px; }
+  .legend__name { font-family:var(--font-body); font-size:var(--text-small); color:var(--ink-2); }
+  .legend__val { font-family:var(--font-mono); font-variant-numeric:tabular-nums; font-size:var(--text-small); color:var(--ink-2); text-align:right; }
+  .legend__row.is-outlier .legend__name, .legend__row.is-outlier .legend__val { color:var(--accent); font-weight:600; }
+  .fig__foot { display:flex; justify-content:space-between; font-family:var(--font-mono); font-size:var(--text-micro); letter-spacing:var(--track-label); text-transform:uppercase; color:var(--ink-5); margin-top:24px; padding-top:12px; border-top:1px solid var(--line-2); }
+</style>
+</head>
+<body>
+<div class="fig">
+  <div class="fig__eyebrow">FIGURE 01 · <!-- CATEGORY --></div>
+  <h1 class="fig__title"><!-- FINDING HEADLINE --></h1>
+  <p class="fig__sub"><!-- QUALIFICATION --></p>
+  <div class="fig__body">
+    <svg class="donut" viewBox="-110 -110 220 220"></svg>
+    <div class="legend" id="legend"></div>
+  </div>
+  <div class="fig__foot">
+    <span>SOURCE · <!-- SOURCE --> · <!-- PERIOD --></span>
+    <span>N = <!-- ROWCOUNT --> · UPDATED <!-- DATE --></span>
+  </div>
+</div>
+<script>
+  // DATA: [{ name: 'Web', value: 52.1, outlier: true }, ...] — keep N <= 6 slices.
+  const DATA = [/* <!-- DATA JSON --> */];
+  const TOTAL = DATA.reduce(function (s, d) { return s + d.value; }, 0) || 1;
+  const RAMP = ['#F2C265', '#E89B52', '#D97A44', '#B85C3A', '#8AB4B8', '#B08CA8'];
+  function polar(r, a) { return [Math.cos(a) * r, Math.sin(a) * r]; }
+  function arc(r1, r2, a0, a1) {
+    var [x0, y0] = polar(r1, a0), [x1, y1] = polar(r1, a1);
+    var [x2, y2] = polar(r2, a1), [x3, y3] = polar(r2, a0);
+    var large = (a1 - a0) > Math.PI ? 1 : 0;
+    return 'M' + x0.toFixed(2) + ',' + y0.toFixed(2) +
+      ' A' + r1 + ',' + r1 + ' 0 ' + large + ' 1 ' + x1.toFixed(2) + ',' + y1.toFixed(2) +
+      ' L' + x2.toFixed(2) + ',' + y2.toFixed(2) +
+      ' A' + r2 + ',' + r2 + ' 0 ' + large + ' 0 ' + x3.toFixed(2) + ',' + y3.toFixed(2) + ' Z';
+  }
+  var svg = document.querySelector('svg.donut');
+  var legend = document.getElementById('legend');
+  var acc = -Math.PI / 2;
+  DATA.forEach(function (d, i) {
+    var a0 = acc, a1 = acc + (d.value / TOTAL) * Math.PI * 2;
+    acc = a1;
+    var color = d.outlier ? getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#F2C265' : RAMP[i % RAMP.length];
+    var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', arc(90, 64, a0, a1));
+    path.setAttribute('fill', color);
+    path.setAttribute('class', 'slice' + (d.outlier ? ' is-outlier' : ''));
+    svg.appendChild(path);
+    var row = document.createElement('div');
+    row.className = 'legend__row' + (d.outlier ? ' is-outlier' : '');
+    var pct = ((d.value / TOTAL) * 100).toFixed(1);
+    row.innerHTML =
+      '<span class="legend__swatch" style="background:' + color + '"></span>' +
+      '<span class="legend__name">' + d.name + '</span>' +
+      '<span class="legend__val">' + pct + '%</span>';
+    legend.appendChild(row);
+  });
+  svg.innerHTML += '<text class="center-label" x="0" y="-6" text-anchor="middle">TOTAL</text>' +
+    '<text class="center-val" x="0" y="22" text-anchor="middle">' + TOTAL.toFixed(0) + '</text>';
+  (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(function () {
+    requestAnimationFrame(function () {
+      document.querySelectorAll('.slice').forEach(function (s, i) { setTimeout(function () { s.classList.add('in'); }, i * 40); });
+    });
+  });
+</script>
+</body>
+</html>
