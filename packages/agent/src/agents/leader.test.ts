@@ -445,6 +445,125 @@ describe('LeaderAgent', () => {
     await scratchpadManager.destroyAll();
   });
 
+  it('enriches tool_end events with kind, label and durationMs', async () => {
+    const scratchpadManager = new ScratchpadManager({ cleanupIntervalMs: 0 });
+    const leader = new LeaderAgent({
+      provider: mockProvider([
+        // Leader calls list_scratchpads — handled synchronously inside the
+        // leader so it's the simplest path to assert enrichment on.
+        [
+          { type: 'tool_call_start', id: 'tc_1', name: 'list_scratchpads' },
+          { type: 'tool_call_end', id: 'tc_1', name: 'list_scratchpads', input: {} },
+          { type: 'message_end', stopReason: 'tool_use' },
+        ],
+        [
+          { type: 'text_delta', text: 'Done.' },
+          { type: 'message_end', stopReason: 'end_turn' },
+        ],
+      ]),
+      toolContext: mockToolContext(),
+      dataSources: [],
+      scratchpadManager,
+    });
+
+    const events = await collectEvents(leader, 'What tables do I have?');
+
+    const start = events.find(
+      (e) => e.type === 'tool_start' && e.name === 'list_scratchpads',
+    ) as Extract<AgentEvent, { type: 'tool_start' }> | undefined;
+    expect(start).toBeDefined();
+    // tool_start carries the kind immediately so the UI can color the row
+    // while inputs are still streaming.
+    expect(start?.kind).toBe('COMPUTE');
+
+    const end = events.find(
+      (e) => e.type === 'tool_end' && e.name === 'list_scratchpads',
+    ) as Extract<AgentEvent, { type: 'tool_end' }> | undefined;
+    expect(end).toBeDefined();
+    expect(end?.kind).toBe('COMPUTE');
+    expect(end?.label).toBe('list_scratchpads()');
+    expect(typeof end?.durationMs).toBe('number');
+    expect((end?.durationMs as number) >= 0).toBe(true);
+
+    await scratchpadManager.destroyAll();
+  });
+
+  it('bubbles sub-agent tool events up with parentAgent stamped', async () => {
+    // Leader synchronously delegates to QueryAgent. The sub-agent runs
+    // run_sql internally; we expect those tool_start/tool_end events to
+    // surface on the outer stream tagged with parentAgent='query'.
+    const leader = new LeaderAgent({
+      provider: mockProvider([
+        // Round 1: leader calls delegate_query
+        [
+          { type: 'tool_call_start', id: 'tc_1', name: 'delegate_query' },
+          {
+            type: 'tool_call_end',
+            id: 'tc_1',
+            name: 'delegate_query',
+            input: { instruction: 'Count rows', source_id: 'pg-main' },
+          },
+          { type: 'message_end', stopReason: 'tool_use' },
+        ],
+        // Sub-agent round 1: run_sql
+        [
+          { type: 'tool_call_start', id: 'sub_1', name: 'run_sql' },
+          {
+            type: 'tool_call_end',
+            id: 'sub_1',
+            name: 'run_sql',
+            input: { source_id: 'pg-main', sql: 'SELECT COUNT(*) FROM orders' },
+          },
+          { type: 'message_end', stopReason: 'tool_use' },
+        ],
+        // Sub-agent round 2: text only
+        [
+          { type: 'text_delta', text: 'Got it.' },
+          { type: 'message_end', stopReason: 'end_turn' },
+        ],
+        // Leader round 2: final text
+        [
+          { type: 'text_delta', text: 'Found the rows.' },
+          { type: 'message_end', stopReason: 'end_turn' },
+        ],
+      ]),
+      toolContext: mockToolContext(),
+      dataSources: [{ id: 'pg-main', name: 'Main DB', type: 'postgres' }],
+    });
+
+    const events = await collectEvents(leader, 'Count orders');
+
+    const bubbledStart = events.find(
+      (e) => e.type === 'tool_start' && e.name === 'run_sql',
+    ) as Extract<AgentEvent, { type: 'tool_start' }> | undefined;
+    expect(bubbledStart).toBeDefined();
+    expect(bubbledStart?.parentAgent).toBe('query');
+    expect(bubbledStart?.kind).toBe('QUERY');
+
+    const bubbledEnd = events.find(
+      (e) => e.type === 'tool_end' && e.name === 'run_sql',
+    ) as Extract<AgentEvent, { type: 'tool_end' }> | undefined;
+    expect(bubbledEnd).toBeDefined();
+    expect(bubbledEnd?.parentAgent).toBe('query');
+    expect(bubbledEnd?.kind).toBe('QUERY');
+    // Label pulled from formatStart — should summarize the SQL body.
+    expect(bubbledEnd?.label).toMatch(/^sql\(SELECT COUNT/);
+    expect(typeof bubbledEnd?.durationMs).toBe('number');
+    // The mocked runSQL returns { rows: [...], rowCount: 1 } → "→ 1 rows".
+    expect(bubbledEnd?.resultSummary).toBe('→ 1 rows');
+
+    // The parent delegate_query tool_end is emitted after the bubble-up
+    // events so the trace renders children before their parent's `done`.
+    const startIdx = events.findIndex((e) => e.type === 'tool_start' && e.name === 'run_sql');
+    const endIdx = events.findIndex((e) => e.type === 'tool_end' && e.name === 'run_sql');
+    const parentEndIdx = events.findIndex(
+      (e) => e.type === 'tool_end' && e.name === 'delegate_query',
+    );
+    expect(startIdx).toBeGreaterThan(-1);
+    expect(endIdx).toBeGreaterThan(startIdx);
+    expect(parentEndIdx).toBeGreaterThan(endIdx);
+  });
+
   it('resets conversation', async () => {
     const leader = new LeaderAgent({
       provider: mockProvider([

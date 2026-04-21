@@ -1,5 +1,6 @@
 import type { AgentDataSource, AgentEvent } from '../agent';
 import { ConversationManager } from '../conversation/manager';
+import { classifyTool, formatEnd, formatStart } from '../events/tool-event-formatter';
 import { buildLeaderPrompt } from '../prompt/leader-prompt';
 import type { LLMProvider, Message, ToolCallResult } from '../provider/types';
 import { ScratchpadManager } from '../scratchpad/manager';
@@ -224,7 +225,15 @@ export class LeaderAgent {
             hasToolCalls = true;
             toolInputBuffers.set(event.id, '');
             toolCalls.push({ id: event.id, name: event.name, input: {} });
-            yield { type: 'tool_start', name: event.name, id: event.id };
+            // Emit start with kind immediately so the UI can color the row
+            // while args are still streaming. Label + resultSummary arrive on
+            // tool_end once inputs and outputs are final.
+            yield {
+              type: 'tool_start',
+              name: event.name,
+              id: event.id,
+              kind: classifyTool(event.name),
+            };
             break;
           case 'tool_call_delta': {
             const buf = toolInputBuffers.get(event.id) ?? '';
@@ -273,6 +282,9 @@ export class LeaderAgent {
       for (const tc of toolCalls) {
         let result: { content: string; isError: boolean };
 
+        const { kind, label } = formatStart(tc.name, tc.input);
+        const startMs = performance.now();
+
         if (tc.name.startsWith('dispatch_')) {
           result = yield* this.handleDispatch(tc, conversationId);
         } else if (tc.name === 'await_tasks') {
@@ -293,14 +305,36 @@ export class LeaderAgent {
           result = { content: `Unknown tool: ${tc.name}`, isError: true };
         }
 
+        const durationMs = Math.max(0, Math.round(performance.now() - startMs));
+        const { resultSummary } = formatEnd(tc.name, result.content, result.isError, durationMs);
+
+        // Flush any sub-agent tool events queued during this tool's execution
+        // BEFORE the parent tool_end lands. That way the trace renders:
+        //   delegate_query (running)
+        //     → SCHEMA get_schema (done)
+        //     → QUERY sql(...) (done)
+        //   delegate_query (done)
+        // instead of ending the delegate row before its nested children.
+        yield* this.flushPending();
+
         toolResults.push({
           toolCallId: tc.id,
           content: result.content,
           isError: result.isError,
         });
-        yield { type: 'tool_end', name: tc.name, result: result.content, isError: result.isError };
+        yield {
+          type: 'tool_end',
+          name: tc.name,
+          result: result.content,
+          isError: result.isError,
+          kind,
+          label,
+          durationMs,
+          ...(resultSummary !== undefined ? { resultSummary } : {}),
+        };
 
-        // Flush any async events that fired during this tool call.
+        // Catch anything that landed between the flush above and tool_end
+        // (vanishingly rare, but cheap insurance).
         yield* this.flushPending();
       }
 
@@ -531,6 +565,13 @@ export class LeaderAgent {
       || this.getLastUserMessage()
       || 'Explore the available data';
 
+    // Bubble sub-agent tool events up to the outer stream. Stamps `parentAgent`
+    // onto the event so the trace UI renders the row as a nested child of the
+    // surrounding dispatch_* / delegate_* call.
+    const onEvent = (event: Extract<AgentEvent, { type: 'tool_start' } | { type: 'tool_end' }>): void => {
+      this.pendingEvents.push({ ...event, parentAgent: role });
+    };
+
     if (role === 'query') {
       const sourceId = (input.source_id as string) ?? this.dataSources[0]?.id ?? '';
       const ds = this.dataSources.find((d) => d.id === sourceId);
@@ -542,6 +583,7 @@ export class LeaderAgent {
         maxToolRounds: this.subAgentMaxRounds,
         maxTokens: this.maxTokensPerRole.query,
         onStatus,
+        onEvent,
       });
 
       const task: AgentTask = {
@@ -576,6 +618,7 @@ export class LeaderAgent {
         maxToolRounds: this.subAgentMaxRounds,
         maxTokens: this.maxTokensPerRole.view,
         onStatus,
+        onEvent,
       });
 
       let dataSummary = input.data_summary as Record<string, unknown> | undefined;
@@ -604,6 +647,7 @@ export class LeaderAgent {
       maxToolRounds: this.subAgentMaxRounds,
       maxTokens: this.maxTokensPerRole.insights,
       onStatus,
+      onEvent,
     });
 
     const task: AgentTask = {

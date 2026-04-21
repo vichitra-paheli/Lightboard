@@ -10,6 +10,7 @@ export {
 export type {
   SubAgent,
   SubAgentConfig,
+  SubAgentEventCallback,
   SubAgentRole,
   AgentTask,
   SubAgentResult,

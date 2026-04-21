@@ -561,13 +561,24 @@ function handleStreaming(
                 enqueue('text', { text: event.text });
                 break;
               case 'tool_start':
-                enqueue('tool_start', { name: event.name, id: event.id });
+                enqueue('tool_start', {
+                  name: event.name,
+                  id: event.id,
+                  ...(event.kind !== undefined ? { kind: event.kind } : {}),
+                  ...(event.label !== undefined ? { label: event.label } : {}),
+                  ...(event.parentAgent !== undefined ? { parentAgent: event.parentAgent } : {}),
+                });
                 break;
               case 'tool_end': {
                 enqueue('tool_end', {
                   name: event.name,
                   result: event.result,
                   isError: event.isError,
+                  ...(event.kind !== undefined ? { kind: event.kind } : {}),
+                  ...(event.label !== undefined ? { label: event.label } : {}),
+                  ...(event.resultSummary !== undefined ? { resultSummary: event.resultSummary } : {}),
+                  ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}),
+                  ...(event.parentAgent !== undefined ? { parentAgent: event.parentAgent } : {}),
                 });
 
                 // Emit view_created for view-related tool results
