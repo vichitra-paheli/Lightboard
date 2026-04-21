@@ -41,6 +41,14 @@ export type MessagePart =
       label?: string;
       /** Backend-supplied terminal suffix like `→ 412 rows`. */
       resultSummary?: string;
+      /**
+       * Task id extracted from a `dispatch_*` tool_end result. The reducer
+       * uses this to resolve the row's final status / duration / summary when
+       * the later `await_tasks` call returns — no intermediate `await_tasks`
+       * row is rendered, so the dispatch row itself carries the spinner until
+       * the work actually completes.
+       */
+      taskId?: string;
     }
   | {
       kind: 'agent_delegation';

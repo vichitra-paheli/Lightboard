@@ -332,6 +332,187 @@ describe('reduceParts', () => {
     expect(texts[0]?.text).toBe('Before');
     expect(texts[1]?.text).toBe('After');
   });
+
+  // Dispatch + await merge — the editorial log renders ONE row per
+  // dispatch_*, no await_tasks row, and the dispatch row picks up the
+  // duration + resultSummary from the eventual await resolution.
+  describe('dispatch_* + await_tasks merge', () => {
+    it('a single dispatch_query + await resolves into one "done" dispatch row with row count', () => {
+      const parts = run([
+        { type: 'tool_start', name: 'dispatch_query' },
+        {
+          type: 'tool_end',
+          name: 'dispatch_query',
+          result: JSON.stringify({
+            task_id: 'task_query_1',
+            role: 'query',
+            status: 'dispatched',
+            dispatched_at: 1,
+          }),
+          durationMs: 0,
+        },
+        { type: 'tool_start', name: 'await_tasks' },
+        {
+          type: 'tool_end',
+          name: 'await_tasks',
+          result: JSON.stringify({
+            task_query_1: {
+              success: true,
+              role: 'query',
+              explanation: 'ok',
+              data_summary: { rowCount: 412, columns: [], sampleRows: [] },
+            },
+          }),
+          durationMs: 850,
+        },
+      ]);
+
+      // Exactly one tool_call part (no await_tasks row).
+      const toolParts = parts.filter((p) => p.kind === 'tool_call');
+      expect(toolParts).toHaveLength(1);
+      expect(toolParts[0]).toMatchObject({
+        kind: 'tool_call',
+        name: 'dispatch_query',
+        status: 'done',
+        durationMs: 850,
+        resultSummary: '→ 412 rows',
+        taskId: 'task_query_1',
+      });
+    });
+
+    it('keeps the dispatch row in running state between dispatch_end and await_end', () => {
+      // This is the visual contract: while the task is still off in the
+      // background, the user sees a spinner on the dispatch row, NOT a
+      // grey-done row with 0ms.
+      let parts: MessagePart[] = [];
+      let ctx = createReducerContext();
+      const steps: SSEEventShape[] = [
+        { type: 'tool_start', name: 'dispatch_query' },
+        {
+          type: 'tool_end',
+          name: 'dispatch_query',
+          result: JSON.stringify({ task_id: 'task_query_1', role: 'query' }),
+          durationMs: 0,
+        },
+      ];
+      for (const ev of steps) {
+        const next = reduceParts(parts, ev, ctx);
+        parts = next.parts;
+        ctx = next.ctx;
+      }
+      const toolParts = parts.filter((p) => p.kind === 'tool_call');
+      expect(toolParts).toHaveLength(1);
+      expect(toolParts[0]).toMatchObject({
+        kind: 'tool_call',
+        name: 'dispatch_query',
+        status: 'running',
+        taskId: 'task_query_1',
+      });
+      // No await_tasks row appeared.
+      expect(toolParts.every((p) => p.name !== 'await_tasks')).toBe(true);
+    });
+
+    it('parallel dispatch_query + dispatch_view merged by a single await resolve each row independently', () => {
+      const parts = run([
+        { type: 'tool_start', name: 'dispatch_query' },
+        {
+          type: 'tool_end',
+          name: 'dispatch_query',
+          result: JSON.stringify({ task_id: 'task_query_1', role: 'query' }),
+          durationMs: 0,
+        },
+        { type: 'tool_start', name: 'dispatch_view' },
+        {
+          type: 'tool_end',
+          name: 'dispatch_view',
+          result: JSON.stringify({ task_id: 'task_view_1', role: 'view' }),
+          durationMs: 0,
+        },
+        { type: 'tool_start', name: 'await_tasks' },
+        {
+          type: 'tool_end',
+          name: 'await_tasks',
+          result: JSON.stringify({
+            task_query_1: {
+              success: true,
+              role: 'query',
+              data_summary: { rowCount: 10, columns: [], sampleRows: [] },
+            },
+            task_view_1: { success: true, role: 'view' },
+          }),
+          durationMs: 1200,
+        },
+      ]);
+
+      const toolParts = parts.filter(
+        (p) => p.kind === 'tool_call',
+      ) as Extract<MessagePart, { kind: 'tool_call' }>[];
+      expect(toolParts).toHaveLength(2);
+      expect(toolParts[0]).toMatchObject({
+        name: 'dispatch_query',
+        status: 'done',
+        durationMs: 1200,
+        resultSummary: '→ 10 rows',
+      });
+      expect(toolParts[1]).toMatchObject({
+        name: 'dispatch_view',
+        status: 'done',
+        durationMs: 1200,
+        resultSummary: '→ view created',
+      });
+    });
+
+    it('a failed task inside await marks its dispatch row as error', () => {
+      const parts = run([
+        { type: 'tool_start', name: 'dispatch_query' },
+        {
+          type: 'tool_end',
+          name: 'dispatch_query',
+          result: JSON.stringify({ task_id: 'task_query_1', role: 'query' }),
+          durationMs: 0,
+        },
+        { type: 'tool_start', name: 'await_tasks' },
+        {
+          type: 'tool_end',
+          name: 'await_tasks',
+          result: JSON.stringify({
+            task_query_1: {
+              success: false,
+              role: 'query',
+              error: 'timeout',
+            },
+          }),
+          durationMs: 30000,
+        },
+      ]);
+
+      const toolParts = parts.filter((p) => p.kind === 'tool_call');
+      expect(toolParts).toHaveLength(1);
+      expect(toolParts[0]).toMatchObject({
+        kind: 'tool_call',
+        name: 'dispatch_query',
+        status: 'error',
+        durationMs: 30000,
+        resultSummary: '→ error',
+      });
+    });
+
+    it('await with no prior dispatch is a no-op (no parts produced or crashed)', () => {
+      const parts = run([
+        { type: 'text', text: 'hello' },
+        { type: 'tool_start', name: 'await_tasks' },
+        {
+          type: 'tool_end',
+          name: 'await_tasks',
+          result: '{}',
+          durationMs: 5,
+        },
+      ]);
+      // Text survives, no tool_call rows.
+      expect(parts).toHaveLength(1);
+      expect(parts[0]).toMatchObject({ kind: 'text', text: 'hello' });
+    });
+  });
 });
 
 describe('createReducer', () => {

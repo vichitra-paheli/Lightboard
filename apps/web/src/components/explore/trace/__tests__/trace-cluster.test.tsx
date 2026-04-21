@@ -88,4 +88,22 @@ describe('<TraceCluster>', () => {
     expect(container.textContent).toContain('1/1 tool call');
     expect(container.textContent).not.toContain('tool calls');
   });
+
+  it('wraps the cluster in a bordered card chrome', () => {
+    // Round-2 visual contract: cluster reads as a self-contained soft
+    // card, not a top-only dashed rule. Asserting the inline style on
+    // the wrapper pins down the chrome enough that a future refactor
+    // that accidentally reverts to "border-top only" fails here.
+    const { container } = renderCluster();
+    const wrapper = container.querySelector('[data-testid="trace-cluster"]') as
+      | HTMLElement
+      | null;
+    expect(wrapper).toBeTruthy();
+    const style = wrapper!.style;
+    expect(style.border).toContain('1px solid');
+    expect(style.borderRadius).toBe('10px');
+    // Background must be the lifted `--bg-4` (not transparent / --bg-0)
+    // so the card reads as its own surface.
+    expect(style.background).toContain('var(--bg-4)');
+  });
 });

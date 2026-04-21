@@ -161,16 +161,29 @@ export function AssistantStream({ parts, isStreaming }: AssistantStreamProps) {
                 isActive={isStreaming && index === parts.length - 1}
               />
             );
-          case 'text':
+          case 'text': {
+            const textIsStreaming =
+              !!isStreaming &&
+              index === lastTextIndex &&
+              lastTextIndex === parts.length - 1;
+            // An empty, non-streaming text part is a ghost row — it renders
+            // as a 26px agent avatar next to an empty content area and
+            // sits awkwardly above the following trace cluster. These
+            // arise from leading/trailing whitespace deltas the model
+            // occasionally emits around tool calls. Skip them so the
+            // cluster panel reads as the first visible block after the
+            // preceding real text.
+            if (part.text.trim().length === 0 && !textIsStreaming) {
+              return null;
+            }
             return (
               <AgentMessage
                 key={`text-${index}`}
                 content={part.text}
-                isStreaming={
-                  !!isStreaming && index === lastTextIndex && lastTextIndex === parts.length - 1
-                }
+                isStreaming={textIsStreaming}
               />
             );
+          }
           case 'status':
             return (
               <div

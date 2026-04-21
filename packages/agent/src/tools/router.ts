@@ -74,6 +74,78 @@ const toolInputSchemas = {
 };
 
 /**
+ * Describe a value's runtime shape for error reporting. Keeps the strings
+ * stable so tests can assert on them and the model can read them on retry.
+ */
+function describeType(value: unknown): string {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'array';
+  return typeof value;
+}
+
+/**
+ * Format a Zod error into a single-line human (and model) readable string.
+ * The default `parsed.error.message` is a pretty-printed multi-line JSON
+ * which truncates badly in SSE logs and leaves the model guessing which
+ * field to fix. This version collapses to `path: expected X (got Y)` per
+ * issue so the retry has enough information to succeed.
+ */
+function formatZodErrors(
+  toolName: string,
+  input: Record<string, unknown>,
+  error: z.ZodError,
+): string {
+  const parts: string[] = [];
+  for (const issue of error.issues) {
+    const path = issue.path.length > 0 ? issue.path.join('.') : '<root>';
+    const received = describeType(
+      issue.path.reduce<unknown>((acc, key) => {
+        if (acc && typeof acc === 'object') {
+          return (acc as Record<string | number, unknown>)[key as string | number];
+        }
+        return undefined;
+      }, input),
+    );
+    if (issue.code === 'invalid_type') {
+      parts.push(`${path} must be a ${issue.expected} (got ${received})`);
+    } else {
+      parts.push(`${path}: ${issue.message} (got ${received})`);
+    }
+  }
+  return `Invalid input for ${toolName}: ${parts.join('; ')}. Re-emit the whole tool input with every field as a plain JSON value of the expected type.`;
+}
+
+/**
+ * Pre-process `create_view` / `modify_view` input to tolerate the quirks
+ * local models (Qwen, Llama, etc.) emit under pressure:
+ *   - `html` chunked into an array of strings → join with '' so multi-line
+ *     HTML bodies arrive intact.
+ *   - `sql` / `title` / `description` emitted as arrays → join with ''.
+ *   - Scalar numbers where strings are expected → coerce via `String()`.
+ *
+ * Anything we can't safely coerce is left alone so Zod returns a readable
+ * error rather than a silently wrong value. This helper runs after
+ * {@link ToolRouter.normalizeInput} (which unwraps JSON-stringified bodies)
+ * and before `safeParse`.
+ */
+function coerceViewInput(input: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = { ...input };
+  for (const key of ['title', 'description', 'sql', 'html'] as const) {
+    const value = result[key];
+    if (Array.isArray(value)) {
+      // Accept arrays of strings — any non-string element short-circuits so
+      // Zod can flag it with a precise `got array` error.
+      if (value.every((v) => typeof v === 'string')) {
+        result[key] = value.join('');
+      }
+    } else if (typeof value === 'number' || typeof value === 'boolean') {
+      result[key] = String(value);
+    }
+  }
+  return result;
+}
+
+/**
  * Routes tool calls from the LLM to the appropriate handler.
  * Accepts a dynamic set of tool definitions at construction time,
  * allowing different agents to use different tool subsets.
@@ -96,8 +168,30 @@ export class ToolRouter {
       return { content: `Tool "${toolName}" is not available for this agent`, isError: true };
     }
 
+    // Some local-model clients wrap the entire tool body in a single
+    // `{ input: "...stringified JSON..." }` envelope instead of passing the
+    // parsed object directly. Unwrap that shape before normalizing so the
+    // per-field coercion below sees the real keys.
+    let workingInput: Record<string, unknown> = input;
+    if (
+      Object.keys(workingInput).length === 1 &&
+      typeof workingInput.input === 'string'
+    ) {
+      const raw = workingInput.input.trim();
+      if (raw.startsWith('{') && raw.endsWith('}')) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            workingInput = parsed as Record<string, unknown>;
+          }
+        } catch {
+          /* fall through — Zod will produce a readable error below */
+        }
+      }
+    }
+
     // Auto-parse stringified JSON values — local models often send nested objects as strings
-    const normalizedInput = this.normalizeInput(input);
+    const normalizedInput = this.normalizeInput(workingInput);
     for (const [key, val] of Object.entries(input)) {
       if (typeof val === 'string' && typeof normalizedInput[key] !== 'string') {
         console.log(`[ToolRouter] Normalized "${key}" from string to ${typeof normalizedInput[key]}`);
@@ -212,9 +306,13 @@ export class ToolRouter {
 
   /** Handle create_view tool call — stores an HTML view. */
   private async handleCreateView(input: Record<string, unknown>): Promise<ToolExecutionResult> {
-    const parsed = toolInputSchemas.create_view.safeParse(input);
+    const coerced = coerceViewInput(input);
+    const parsed = toolInputSchemas.create_view.safeParse(coerced);
     if (!parsed.success) {
-      return { content: `Invalid input: ${parsed.error.message}`, isError: true };
+      return {
+        content: formatZodErrors('create_view', coerced, parsed.error),
+        isError: true,
+      };
     }
 
     const viewId = `view_${Date.now()}`;
@@ -234,9 +332,13 @@ export class ToolRouter {
 
   /** Handle modify_view tool call — patches an existing HTML view. */
   private async handleModifyView(input: Record<string, unknown>): Promise<ToolExecutionResult> {
-    const parsed = toolInputSchemas.modify_view.safeParse(input);
+    const coerced = coerceViewInput(input);
+    const parsed = toolInputSchemas.modify_view.safeParse(coerced);
     if (!parsed.success) {
-      return { content: `Invalid input: ${parsed.error.message}`, isError: true };
+      return {
+        content: formatZodErrors('modify_view', coerced, parsed.error),
+        isError: true,
+      };
     }
 
     const existing = this.viewStore.get(parsed.data.view_id);
