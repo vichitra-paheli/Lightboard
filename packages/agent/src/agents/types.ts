@@ -48,6 +48,14 @@ export interface SubAgentResult {
   explanation: string;
   /** Error message if success is false. */
   error?: string;
+  /**
+   * Optional scratchpad table name when the query agent saved rows to the
+   * per-session scratchpad. Surfaced through the async dispatch/await path
+   * so the leader can pass it verbatim to a follow-up `dispatch_view` —
+   * otherwise the view specialist sees no data and fabricates plausible-
+   * looking values. Only set for role === 'query' tasks that saved rows.
+   */
+  scratchpadTable?: string;
 }
 
 /**

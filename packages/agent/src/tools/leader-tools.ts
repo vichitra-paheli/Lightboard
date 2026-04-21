@@ -1,4 +1,5 @@
 import type { ToolDefinition } from '../provider/types';
+import { narrateTools } from './narrate-tools';
 
 /**
  * Tool definitions available to the Leader Agent.
@@ -11,6 +12,9 @@ import type { ToolDefinition } from '../provider/types';
  *
  * Data stays server-side: query tasks auto-save results to the scratchpad.
  * The LLM only sees compact summaries (columns, row count, sample rows).
+ *
+ * The leader's tool list ends with `narrate_summary` — the terminal
+ * finalization tool. See {@link narrateTools} for the full contract.
  */
 export const leaderTools: ToolDefinition[] = [
   {
@@ -41,7 +45,9 @@ export const leaderTools: ToolDefinition[] = [
       'Dispatch a visualization task to the View specialist and return immediately with a task_id. ' +
       'Use `await_tasks` to collect the result. ' +
       'You may dispatch this before a `dispatch_query` result is available by referencing a scratchpad table — ' +
-      'just wait on the query task first with `await_tasks`.',
+      'just wait on the query task first with `await_tasks`. ' +
+      'Pass `chart_hint` only when you have a strong signal from the data shape — the leader auto-infers it ' +
+      'from the query result columns otherwise.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -52,6 +58,13 @@ export const leaderTools: ToolDefinition[] = [
         scratchpad_table: {
           type: 'string',
           description: 'Name of the scratchpad table containing the data',
+        },
+        chart_hint: {
+          type: 'string',
+          enum: ['horizontal-bar', 'vertical-bar', 'line', 'donut', 'stat', 'auto'],
+          description:
+            'Optional chart shape hint. Usually omit — the leader infers this from the query result column types ' +
+            'before dispatching. Only set when you have explicit reason to pick a specific shape.',
         },
       },
       required: ['instruction'],
@@ -232,4 +245,5 @@ export const leaderTools: ToolDefinition[] = [
       required: ['table_name'],
     },
   },
+  ...narrateTools,
 ];

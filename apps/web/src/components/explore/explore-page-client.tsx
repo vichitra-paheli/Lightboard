@@ -459,6 +459,23 @@ export function ExplorePageClient() {
           continue;
         }
 
+        // `narrate_ready` is a message-level field (not a parts[] entry).
+        // Patch the message directly so the KEY TAKEAWAYS block renders at
+        // the bottom of the turn the instant the leader finalizes.
+        if (parsed.type === 'narrate_ready') {
+          // Still run it through the reducer so its status-clear side
+          // effect (drops a trailing transient status) lands, but discard
+          // the returned parts — unchanged.
+          applyEvent(assistantMsgId, (prev) => reducer.apply(parsed, prev));
+          const narration = parsed.narration;
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId ? { ...m, narration } : m,
+            ),
+          );
+          continue;
+        }
+
         applyEvent(assistantMsgId, (prev) => reducer.apply(parsed, prev));
       }
 

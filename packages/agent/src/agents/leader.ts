@@ -1,5 +1,6 @@
 import type { AgentDataSource, AgentEvent } from '../agent';
 import { ConversationManager } from '../conversation/manager';
+import type { ChartHint } from '../design-system';
 import { classifyTool, formatEnd, formatStart } from '../events/tool-event-formatter';
 import { buildLeaderPrompt } from '../prompt/leader-prompt';
 import type { LLMProvider, Message, ToolCallResult } from '../provider/types';
@@ -97,6 +98,104 @@ function buildDataSummary(data: Record<string, unknown>): Record<string, unknown
   return { columns, rowCount, sampleRows };
 }
 
+/** Heuristic: does a column name or value look date-like? */
+const DATE_NAME_RE = /\b(date|time|day|month|year|week|quarter|hour|minute|ts|timestamp|created|updated)\b/i;
+const ISO_DATE_RE = /^\d{4}-\d{2}(?:-\d{2})?/;
+
+/**
+ * Shape of the inferred column summary used by {@link inferChartHint}. Matches
+ * what {@link buildDataSummary} emits — name + primitive type string — plus
+ * (optional) a sample value so we can probe for ISO dates.
+ */
+export interface InferChartHintColumn {
+  name: string;
+  /** Primitive type returned by `typeof` on the first sample row. */
+  type: string;
+  /** Optional first sample value, used to detect date strings. */
+  sample?: unknown;
+}
+
+/**
+ * Infer a {@link ChartHint} from a compact data summary. Run locally in the
+ * leader before `dispatch_view` so the view specialist sees a snippet matching
+ * the query's actual shape. Heuristics (not ML):
+ *
+ *   - 1 numeric only                                   → `stat`
+ *   - 1 numeric + 1 date/time                          → `line`
+ *   - multiple numerics + date                         → `line`
+ *   - 1 numeric + 1 categorical (<=10 rows / buckets)  → `horizontal-bar`
+ *   - parts-of-whole (<=6 categories, single numeric)  → `donut`
+ *   - anything else                                    → `auto`
+ *
+ * Cheap, deterministic, and wrong-sometimes — that's fine. The view prompt
+ * always falls back to `auto` if we can't decide, which still includes the
+ * canonical horizontal-bar snippet as a reference.
+ */
+export function inferChartHint(
+  columns: InferChartHintColumn[],
+  rowCount: number,
+): ChartHint {
+  if (columns.length === 0 || rowCount === 0) return 'auto';
+
+  const isDate = (c: InferChartHintColumn): boolean => {
+    if (DATE_NAME_RE.test(c.name)) return true;
+    if (c.type === 'string' && typeof c.sample === 'string' && ISO_DATE_RE.test(c.sample)) return true;
+    if (c.type === 'object' && c.sample instanceof Date) return true;
+    return false;
+  };
+
+  const numerics = columns.filter((c) => c.type === 'number');
+  const dates = columns.filter((c) => isDate(c));
+  const categoricals = columns.filter((c) => c.type === 'string' && !isDate(c));
+
+  // 1 numeric only — stat card.
+  if (columns.length === 1 && numerics.length === 1 && rowCount === 1) {
+    return 'stat';
+  }
+
+  // Time series (one or more numerics against a date axis).
+  if (dates.length >= 1 && numerics.length >= 1) {
+    return 'line';
+  }
+
+  // Parts-of-whole — small N, one categorical + one numeric.
+  if (
+    numerics.length === 1 &&
+    categoricals.length === 1 &&
+    rowCount >= 2 &&
+    rowCount <= 6
+  ) {
+    return 'donut';
+  }
+
+  // Ranked comparison — one categorical + one numeric, more than a handful.
+  if (numerics.length >= 1 && categoricals.length >= 1 && rowCount <= 30) {
+    return 'horizontal-bar';
+  }
+
+  return 'auto';
+}
+
+const KNOWN_CHART_HINTS: ReadonlySet<ChartHint> = new Set([
+  'horizontal-bar',
+  'vertical-bar',
+  'line',
+  'donut',
+  'stat',
+  'auto',
+]);
+
+/**
+ * Coerce an untrusted string into a known {@link ChartHint} or return
+ * `undefined` if it isn't in the allowlist. Lets the leader accept an
+ * explicit `chart_hint` on `dispatch_view` without risking a freeform value
+ * leaking into the view prompt.
+ */
+function normalizeChartHint(raw: unknown): ChartHint | undefined {
+  if (typeof raw !== 'string') return undefined;
+  return KNOWN_CHART_HINTS.has(raw as ChartHint) ? (raw as ChartHint) : undefined;
+}
+
 /** Outcome of running a single sub-agent task end-to-end. */
 interface SubAgentRunOutcome {
   /** The structured sub-agent result (success/failure, data, explanation). */
@@ -139,6 +238,22 @@ export class LeaderAgent {
   private taskPool: TaskPool = new TaskPool();
   /** Events emitted by background tasks, flushed at safe yield points. */
   private pendingEvents: AgentEvent[] = [];
+  /**
+   * Whether `narrate_summary` has already been called successfully this turn.
+   * Set by the tool-dispatch branch; consumed by the outer loop to short-
+   * circuit the next LLM turn with `stopReason: 'end_turn'` so models that
+   * would otherwise keep emitting text / tool-calls after narrating are
+   * forced to end cleanly. Reset at the start of every `chat()` call.
+   */
+  private narrateCalled = false;
+  /**
+   * Optional override for the leader system prompt. When set, the override is
+   * passed to the provider verbatim instead of the output of
+   * {@link buildLeaderPrompt}. Intended for the eval harness (Phase 4) — it
+   * lets experimental prompt variants be swapped in at runtime without
+   * touching the cache key. Not part of the production code path.
+   */
+  private promptOverride: string | null = null;
 
   constructor(config: LeaderAgentConfig) {
     if (!config.providers && !config.provider) {
@@ -179,6 +294,16 @@ export class LeaderAgent {
   }
 
   /**
+   * Swap the leader's system prompt with an override string. Passes the
+   * provided text to the LLM verbatim in place of {@link buildLeaderPrompt}'s
+   * output. Meant for the eval harness that A/B tests prompt variants —
+   * do NOT use in production. Pass `null` to restore the default behaviour.
+   */
+  setPromptOverride(prompt: string | null): void {
+    this.promptOverride = prompt;
+  }
+
+  /**
    * Process a user message and stream the leader's response.
    * Delegates to sub-agents as needed, emitting agent_start/agent_end events.
    */
@@ -192,13 +317,14 @@ export class LeaderAgent {
     // Fresh task pool per user turn — tasks should not survive across turns.
     this.taskPool = new TaskPool();
     this.pendingEvents = [];
+    this.narrateCalled = false;
 
     const scratchpad = this.scratchpadManager.getOrCreate(conversationId);
     const scratchpadTables = scratchpad.listTables().map((t) =>
       `${t.name} (${t.rowCount} rows): ${t.description}`,
     );
 
-    const systemPrompt = buildLeaderPrompt({
+    const systemPrompt = this.promptOverride ?? buildLeaderPrompt({
       dataSources: this.dataSources,
       scratchpadTables,
     });
@@ -301,6 +427,11 @@ export class LeaderAgent {
           result = { content: JSON.stringify(tables), isError: false };
         } else if (tc.name === 'load_scratchpad') {
           result = await this.handleLoadScratchpad(tc, conversationId);
+        } else if (tc.name === 'narrate_summary') {
+          result = this.handleNarrateSummary(tc);
+          if (!result.isError) {
+            this.narrateCalled = true;
+          }
         } else {
           result = { content: `Unknown tool: ${tc.name}`, isError: true };
         }
@@ -343,6 +474,16 @@ export class LeaderAgent {
         content: '',
         toolResults,
       });
+
+      // narrate_summary is the leader's terminal tool. If it ran successfully
+      // this round we short-circuit — no more LLM turns, no trailing
+      // chatter. Any model that would have kept calling tools after
+      // narrating is forced to end cleanly with `end_turn`.
+      if (this.narrateCalled) {
+        yield* this.drainOutstanding();
+        yield { type: 'done', stopReason: 'end_turn' };
+        return;
+      }
     }
 
     yield* this.drainOutstanding();
@@ -455,6 +596,13 @@ export class LeaderAgent {
         if (result.role === 'query') {
           // Query results: compact summary for the LLM, scratchpad table in side channel.
           entry.data_summary = buildDataSummary(result.data);
+          // Surface the scratchpad table name so the leader can pass it to a
+          // follow-up `dispatch_view`. The sync delegate_query path already
+          // does this via its inline JSON blob; the async path was dropping
+          // it, so the view agent received no data and fabricated values.
+          if (result.scratchpadTable) {
+            entry.scratchpad_table = result.scratchpadTable;
+          }
         } else {
           // View and insights: return raw data so callers can surface viewSpec / analysis.
           entry.data = result.data;
@@ -607,6 +755,14 @@ export class LeaderAgent {
         }
       }
 
+      // Stamp the scratchpad table name onto the result itself so the async
+      // dispatch/await path can surface it to the leader's LLM. Without this
+      // the model never learns the table name and can't pass it to a follow-
+      // up dispatch_view, which causes the view agent to hallucinate data.
+      if (tableName) {
+        agentResult.scratchpadTable = tableName;
+      }
+
       return { result: agentResult, scratchpadTable: tableName };
     }
 
@@ -630,10 +786,57 @@ export class LeaderAgent {
         } catch { /* fallback to empty summary */ }
       }
 
+      // Failsafe: if the leader forgot to pass `scratchpad_table` AND there is
+      // no inline data_summary, fall back to the most recent scratchpad table
+      // for this conversation. Without this the view agent runs with an empty
+      // context and fabricates plausible-looking values (issue #108). The
+      // `listTables()` order is append-only — last entry is the most recent
+      // query_N for this session.
+      if (!dataSummary) {
+        try {
+          const scratchpad = this.scratchpadManager.getOrCreate(conversationId);
+          const tables = scratchpad.listTables();
+          if (tables.length > 0) {
+            const mostRecent = tables[tables.length - 1]!;
+            const rows = await scratchpad.loadTable(mostRecent.name);
+            if (rows.length > 0) {
+              dataSummary = buildDataSummary({ rows });
+              onStatus?.(
+                `View agent: no explicit data passed; falling back to most recent scratchpad table "${mostRecent.name}" (${rows.length} rows).`,
+              );
+            }
+          }
+        } catch { /* fall through — the view prompt rubric tells the agent to refuse on empty context */ }
+      }
+
+      // chart_hint resolution order:
+      //   1. Explicit hint from the leader's dispatch_view call.
+      //   2. Inferred from the data summary (column types + row count).
+      //   3. 'auto' — the view prompt falls back to horizontal-bar + stat.
+      const explicitHint = typeof input.chart_hint === 'string' ? input.chart_hint : undefined;
+      const summaryCols = Array.isArray(dataSummary?.columns)
+        ? (dataSummary!.columns as Array<{ name?: unknown; type?: unknown }>)
+        : [];
+      const sampleRow =
+        Array.isArray(dataSummary?.sampleRows) && dataSummary!.sampleRows.length > 0
+          ? (dataSummary!.sampleRows as Array<Record<string, unknown>>)[0]
+          : undefined;
+      const rowCount =
+        typeof dataSummary?.rowCount === 'number' ? (dataSummary!.rowCount as number) : 0;
+      const inferCols: InferChartHintColumn[] = summaryCols
+        .map((c) => ({
+          name: typeof c?.name === 'string' ? c.name : '',
+          type: typeof c?.type === 'string' ? c.type : 'unknown',
+          sample: sampleRow && typeof c?.name === 'string' ? sampleRow[c.name] : undefined,
+        }))
+        .filter((c) => !!c.name);
+      const inferred = inferChartHint(inferCols, rowCount);
+      const chartHint: ChartHint = normalizeChartHint(explicitHint) ?? inferred;
+
       const task: AgentTask = {
         id: `task_${Date.now()}`,
         instruction,
-        context: { dataSummary: dataSummary ?? {} },
+        context: { dataSummary: dataSummary ?? {}, chartHint },
       };
 
       return { result: await agent.run(task) };
@@ -657,6 +860,102 @@ export class LeaderAgent {
     };
 
     return { result: await agent.run(task) };
+  }
+
+  /**
+   * Validate and echo a `narrate_summary` tool call. Returns a structured
+   * JSON payload the SSE route re-emits as a `narrate_ready` event for the
+   * UI. Validation is deliberately defensive — local Qwen builds drop
+   * minItems / maxItems constraints sometimes, so we check shape here even
+   * though the JSON Schema already declares it.
+   */
+  private handleNarrateSummary(
+    tc: ToolCallResult,
+  ): { content: string; isError: boolean } {
+    const input = (tc.input ?? {}) as Record<string, unknown>;
+    const rawBullets = input.bullets;
+    if (!Array.isArray(rawBullets)) {
+      return {
+        content: 'narrate_summary: `bullets` is required and must be an array of 3 objects.',
+        isError: true,
+      };
+    }
+    if (rawBullets.length !== 3) {
+      return {
+        content: `narrate_summary: expected exactly 3 bullets, received ${rawBullets.length}.`,
+        isError: true,
+      };
+    }
+
+    const seenRanks = new Set<number>();
+    const cleaned: Array<{
+      rank: 1 | 2 | 3;
+      headline: string;
+      value?: string;
+      body: string;
+    }> = [];
+    for (let i = 0; i < rawBullets.length; i++) {
+      const b = rawBullets[i];
+      if (!b || typeof b !== 'object') {
+        return {
+          content: `narrate_summary: bullet ${i} is not an object.`,
+          isError: true,
+        };
+      }
+      const obj = b as Record<string, unknown>;
+      const rank = obj.rank;
+      if (rank !== 1 && rank !== 2 && rank !== 3) {
+        return {
+          content: `narrate_summary: bullet ${i} has invalid rank "${String(rank)}" (must be 1, 2, or 3).`,
+          isError: true,
+        };
+      }
+      if (seenRanks.has(rank)) {
+        return {
+          content: `narrate_summary: duplicate rank ${rank} — each of 1, 2, 3 must appear exactly once.`,
+          isError: true,
+        };
+      }
+      seenRanks.add(rank);
+
+      const headline = typeof obj.headline === 'string' ? obj.headline.trim() : '';
+      if (!headline) {
+        return {
+          content: `narrate_summary: bullet ${i} (rank ${rank}) has empty or missing headline.`,
+          isError: true,
+        };
+      }
+
+      const body = typeof obj.body === 'string' ? obj.body.trim() : '';
+      if (!body) {
+        return {
+          content: `narrate_summary: bullet ${i} (rank ${rank}) has empty or missing body.`,
+          isError: true,
+        };
+      }
+
+      const value = typeof obj.value === 'string' ? obj.value.trim() : undefined;
+      cleaned.push({
+        rank,
+        headline,
+        body,
+        ...(value ? { value } : {}),
+      });
+    }
+
+    // Sort by rank so downstream consumers don't have to re-order.
+    cleaned.sort((a, b) => a.rank - b.rank);
+
+    const caveat = typeof input.caveat === 'string' ? input.caveat.trim() : '';
+
+    return {
+      content: JSON.stringify({
+        bullets: cleaned,
+        ...(caveat ? { caveat } : {}),
+        rendered: true,
+      }),
+      isError: false,
+    };
   }
 
   /** Handle load_scratchpad — returns summary, not full data. */

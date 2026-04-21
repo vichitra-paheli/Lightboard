@@ -579,4 +579,447 @@ describe('LeaderAgent', () => {
     leader.reset();
     expect(leader.getHistory()).toHaveLength(0);
   });
+
+  describe('narrate_summary', () => {
+    /** A canonical 3-bullet narrate_summary payload used across these tests. */
+    const validNarratePayload = {
+      bullets: [
+        {
+          rank: 1,
+          headline: 'North region',
+          value: '+12.4%',
+          body: 'North led Q4 growth, well ahead of the pack.',
+        },
+        {
+          rank: 2,
+          headline: 'East region',
+          value: '+4.1%',
+          body: 'East held steady with a modest uptick.',
+        },
+        {
+          rank: 3,
+          headline: 'West region',
+          body: 'West was flat within normal noise.',
+        },
+      ],
+      caveat: 'Sample size of 40 stores; treat with caution.',
+    };
+
+    it('ends the turn with end_turn and enriches tool_end with NARRATE kind', async () => {
+      const leader = new LeaderAgent({
+        provider: mockProvider([
+          [
+            { type: 'tool_call_start', id: 'nt_1', name: 'narrate_summary' },
+            {
+              type: 'tool_call_end',
+              id: 'nt_1',
+              name: 'narrate_summary',
+              input: validNarratePayload,
+            },
+            { type: 'message_end', stopReason: 'tool_use' },
+          ],
+          // This round should never execute — the leader short-circuits after
+          // narrate. If it does run, the fixture stops it harmlessly.
+          [
+            { type: 'text_delta', text: 'extra chatter that should never appear' },
+            { type: 'message_end', stopReason: 'end_turn' },
+          ],
+        ]),
+        toolContext: mockToolContext(),
+        dataSources: [],
+      });
+
+      const events = await collectEvents(leader, 'Summarize the regional breakdown');
+
+      const end = events.find(
+        (e) => e.type === 'tool_end' && e.name === 'narrate_summary',
+      ) as Extract<AgentEvent, { type: 'tool_end' }> | undefined;
+      expect(end).toBeDefined();
+      expect(end?.isError).toBe(false);
+      expect(end?.kind).toBe('NARRATE');
+      expect(typeof end?.durationMs).toBe('number');
+
+      // Result is a valid JSON blob carrying the normalized bullets + caveat.
+      const parsed = JSON.parse(end!.result);
+      expect(Array.isArray(parsed.bullets)).toBe(true);
+      expect(parsed.bullets).toHaveLength(3);
+      expect(parsed.bullets.map((b: { rank: number }) => b.rank)).toEqual([1, 2, 3]);
+      expect(parsed.caveat).toBe('Sample size of 40 stores; treat with caution.');
+      expect(parsed.rendered).toBe(true);
+
+      // Short-circuit must fire: the turn ends with end_turn after narrate,
+      // and no extra text chunk from the unreached fixture round leaks out.
+      const done = events.find(
+        (e) => e.type === 'done',
+      ) as Extract<AgentEvent, { type: 'done' }> | undefined;
+      expect(done?.stopReason).toBe('end_turn');
+
+      const leakedText = events.find(
+        (e) => e.type === 'text' && e.text.includes('extra chatter'),
+      );
+      expect(leakedText).toBeUndefined();
+    });
+
+    it('reports a validation error when the payload has the wrong bullet count', async () => {
+      const leader = new LeaderAgent({
+        provider: mockProvider([
+          [
+            { type: 'tool_call_start', id: 'nt_1', name: 'narrate_summary' },
+            {
+              type: 'tool_call_end',
+              id: 'nt_1',
+              name: 'narrate_summary',
+              input: { bullets: [{ rank: 1, headline: 'only one', body: 'oops' }] },
+            },
+            { type: 'message_end', stopReason: 'tool_use' },
+          ],
+          [
+            { type: 'text_delta', text: 'Let me retry.' },
+            { type: 'message_end', stopReason: 'end_turn' },
+          ],
+        ]),
+        toolContext: mockToolContext(),
+        dataSources: [],
+      });
+
+      const events = await collectEvents(leader, 'summarize');
+      const end = events.find(
+        (e) => e.type === 'tool_end' && e.name === 'narrate_summary',
+      ) as Extract<AgentEvent, { type: 'tool_end' }> | undefined;
+      expect(end?.isError).toBe(true);
+      expect(end?.result).toMatch(/expected exactly 3 bullets/);
+    });
+
+    it('reports a validation error when two bullets share a rank', async () => {
+      const leader = new LeaderAgent({
+        provider: mockProvider([
+          [
+            { type: 'tool_call_start', id: 'nt_1', name: 'narrate_summary' },
+            {
+              type: 'tool_call_end',
+              id: 'nt_1',
+              name: 'narrate_summary',
+              input: {
+                bullets: [
+                  { rank: 1, headline: 'a', body: 'A' },
+                  { rank: 1, headline: 'b', body: 'B' },
+                  { rank: 2, headline: 'c', body: 'C' },
+                ],
+              },
+            },
+            { type: 'message_end', stopReason: 'tool_use' },
+          ],
+          [
+            { type: 'text_delta', text: 'Retrying.' },
+            { type: 'message_end', stopReason: 'end_turn' },
+          ],
+        ]),
+        toolContext: mockToolContext(),
+        dataSources: [],
+      });
+
+      const events = await collectEvents(leader, 'summarize');
+      const end = events.find(
+        (e) => e.type === 'tool_end' && e.name === 'narrate_summary',
+      ) as Extract<AgentEvent, { type: 'tool_end' }> | undefined;
+      expect(end?.isError).toBe(true);
+      expect(end?.result).toMatch(/duplicate rank/);
+    });
+
+    it('reports a validation error when a bullet has an empty body', async () => {
+      const leader = new LeaderAgent({
+        provider: mockProvider([
+          [
+            { type: 'tool_call_start', id: 'nt_1', name: 'narrate_summary' },
+            {
+              type: 'tool_call_end',
+              id: 'nt_1',
+              name: 'narrate_summary',
+              input: {
+                bullets: [
+                  { rank: 1, headline: 'a', body: 'A' },
+                  { rank: 2, headline: 'b', body: '   ' },
+                  { rank: 3, headline: 'c', body: 'C' },
+                ],
+              },
+            },
+            { type: 'message_end', stopReason: 'tool_use' },
+          ],
+          [
+            { type: 'text_delta', text: 'Retrying.' },
+            { type: 'message_end', stopReason: 'end_turn' },
+          ],
+        ]),
+        toolContext: mockToolContext(),
+        dataSources: [],
+      });
+
+      const events = await collectEvents(leader, 'summarize');
+      const end = events.find(
+        (e) => e.type === 'tool_end' && e.name === 'narrate_summary',
+      ) as Extract<AgentEvent, { type: 'tool_end' }> | undefined;
+      expect(end?.isError).toBe(true);
+      expect(end?.result).toMatch(/empty or missing body/);
+    });
+
+    it('continues the leader loop when validation fails (does not short-circuit)', async () => {
+      const leader = new LeaderAgent({
+        provider: mockProvider([
+          [
+            { type: 'tool_call_start', id: 'nt_1', name: 'narrate_summary' },
+            {
+              type: 'tool_call_end',
+              id: 'nt_1',
+              name: 'narrate_summary',
+              input: { bullets: [] },
+            },
+            { type: 'message_end', stopReason: 'tool_use' },
+          ],
+          // After the validation error, the leader should get another turn
+          // and emit this retry text.
+          [
+            { type: 'text_delta', text: 'retry landed' },
+            { type: 'message_end', stopReason: 'end_turn' },
+          ],
+        ]),
+        toolContext: mockToolContext(),
+        dataSources: [],
+      });
+
+      const events = await collectEvents(leader, 'summarize');
+      const retryText = events.find(
+        (e) => e.type === 'text' && e.text === 'retry landed',
+      );
+      expect(retryText).toBeDefined();
+    });
+  });
+
+  describe('view-agent data grounding (issue #108)', () => {
+    it('await_tasks entry surfaces both data_summary and scratchpad_table for a successful query', async () => {
+      const scratchpadManager = new ScratchpadManager({ cleanupIntervalMs: 0 });
+      const ctx = mockToolContext();
+      (ctx.runSQL as ReturnType<typeof vi.fn>).mockResolvedValue({
+        rows: [
+          { name: 'Player A', tsr: 19.04 },
+          { name: 'Player B', tsr: 19.01 },
+          { name: 'Player C', tsr: 16.9 },
+        ],
+        rowCount: 3,
+      });
+
+      // Sequence: leader dispatches → query sub-agent runs run_sql → leader awaits.
+      const leader = new LeaderAgent({
+        provider: mockProvider([
+          // Leader round 1: dispatch_query
+          [
+            { type: 'tool_call_start', id: 'd1', name: 'dispatch_query' },
+            {
+              type: 'tool_call_end',
+              id: 'd1',
+              name: 'dispatch_query',
+              input: { instruction: 'Top batters by TSR', source_id: 'pg-main' },
+            },
+            { type: 'message_end', stopReason: 'tool_use' },
+          ],
+          // Query sub-agent round 1: run_sql
+          [
+            { type: 'tool_call_start', id: 'q1', name: 'run_sql' },
+            {
+              type: 'tool_call_end',
+              id: 'q1',
+              name: 'run_sql',
+              input: { source_id: 'pg-main', sql: 'SELECT name, tsr FROM ipl_batters' },
+            },
+            { type: 'message_end', stopReason: 'tool_use' },
+          ],
+          // Query sub-agent round 2: text-only close
+          [
+            { type: 'text_delta', text: 'Query complete.' },
+            { type: 'message_end', stopReason: 'end_turn' },
+          ],
+          // Leader round 2: await_tasks
+          [
+            { type: 'tool_call_start', id: 'a1', name: 'await_tasks' },
+            {
+              type: 'tool_call_end',
+              id: 'a1',
+              name: 'await_tasks',
+              input: { task_ids: ['task_query_1'] },
+            },
+            { type: 'message_end', stopReason: 'tool_use' },
+          ],
+          // Leader round 3: wrap up text
+          [
+            { type: 'text_delta', text: 'Done.' },
+            { type: 'message_end', stopReason: 'end_turn' },
+          ],
+        ]),
+        toolContext: ctx,
+        dataSources: [{ id: 'pg-main', name: 'Main DB', type: 'postgres' }],
+        scratchpadManager,
+      });
+
+      const events = await collectEvents(leader, 'Show me top batters by TSR');
+
+      const awaitEnd = events.find(
+        (e) => e.type === 'tool_end' && e.name === 'await_tasks',
+      ) as Extract<AgentEvent, { type: 'tool_end' }> | undefined;
+      expect(awaitEnd).toBeDefined();
+      expect(awaitEnd!.isError).toBe(false);
+
+      const parsed = JSON.parse(awaitEnd!.result) as Record<
+        string,
+        { success: boolean; data_summary?: Record<string, unknown>; scratchpad_table?: string }
+      >;
+      const [entry] = Object.values(parsed);
+      expect(entry).toBeDefined();
+      expect(entry!.success).toBe(true);
+      // Both fields must be present so the leader's LLM can wire up dispatch_view.
+      expect(entry!.data_summary).toBeDefined();
+      expect(entry!.scratchpad_table).toBe('query_1');
+
+      await scratchpadManager.destroyAll();
+    });
+
+    it('ViewAgent falls back to most recent scratchpad table when dispatch_view omits both data_summary and scratchpad_table', async () => {
+      const scratchpadManager = new ScratchpadManager({ cleanupIntervalMs: 0 });
+      // Pre-seed the conversation's scratchpad with a query_1 table so the
+      // fallback has something to load.
+      const pad = scratchpadManager.getOrCreate('test-conv');
+      await pad.saveTable(
+        'query_1',
+        [
+          { name: 'RM Patidar', tsr: 19.04 },
+          { name: 'Abhishek Sharma', tsr: 19.01 },
+        ],
+        'Top batters',
+      );
+
+      const fallbackMessages: string[] = [];
+
+      // Spy provider: captures the system prompt handed to the view sub-agent
+      // so we can assert it received the seeded data. First two calls belong
+      // to the leader (dispatch + await text wrap); the third is the view
+      // sub-agent's own LLM call.
+      let callIdx = 0;
+      const seenSystemPrompts: string[] = [];
+      const sequences: StreamEvent[][] = [
+        // Leader round 1: dispatch_view with ONLY instruction (no data_summary, no scratchpad_table).
+        [
+          { type: 'tool_call_start', id: 'dv1', name: 'dispatch_view' },
+          {
+            type: 'tool_call_end',
+            id: 'dv1',
+            name: 'dispatch_view',
+            input: { instruction: 'Plot the top batters' },
+          },
+          { type: 'message_end', stopReason: 'tool_use' },
+        ],
+        // View sub-agent round 1: text-only (we don't need to test create_view
+        // wiring here — only that the view agent received non-empty context).
+        [
+          { type: 'text_delta', text: 'Noted.' },
+          { type: 'message_end', stopReason: 'end_turn' },
+        ],
+        // Leader round 2: await_tasks then close.
+        [
+          { type: 'tool_call_start', id: 'at1', name: 'await_tasks' },
+          {
+            type: 'tool_call_end',
+            id: 'at1',
+            name: 'await_tasks',
+            input: { task_ids: ['task_view_1'] },
+          },
+          { type: 'message_end', stopReason: 'tool_use' },
+        ],
+        // Leader round 3: final text.
+        [
+          { type: 'text_delta', text: 'Done.' },
+          { type: 'message_end', stopReason: 'end_turn' },
+        ],
+      ];
+      const provider: LLMProvider = {
+        name: 'spy',
+        async *chat(_messages, _tools, options) {
+          seenSystemPrompts.push(options?.system ?? '');
+          const events = sequences[callIdx] ?? [
+            { type: 'message_end' as const, stopReason: 'end_turn' },
+          ];
+          callIdx++;
+          for (const ev of events) yield ev;
+        },
+      };
+
+      const leader = new LeaderAgent({
+        provider,
+        toolContext: mockToolContext(),
+        dataSources: [{ id: 'pg-main', name: 'Main DB', type: 'postgres' }],
+        scratchpadManager,
+      });
+
+      // Hook into status events so we can assert the fallback message fired.
+      const events: AgentEvent[] = [];
+      for await (const event of leader.chat('Plot those batters', 'test-conv')) {
+        events.push(event);
+        if (event.type === 'status' && event.scope === 'view') {
+          fallbackMessages.push(event.message);
+        } else if (event.type === 'task_progress') {
+          fallbackMessages.push(event.message);
+        }
+      }
+
+      // The view sub-agent's system prompt is the second LLM call
+      // (index 1) — between the leader's round 1 and round 2. It should
+      // include the seeded row data because the fallback loaded query_1.
+      // We search across all captured prompts because the exact index
+      // depends on internal scheduling.
+      const viewPrompt = seenSystemPrompts.find((p) => p.includes('Data summary'));
+      expect(viewPrompt).toBeDefined();
+      expect(viewPrompt).toContain('RM Patidar');
+
+      // The fallback status message should have surfaced.
+      const fallbackFired = fallbackMessages.some((m) =>
+        m.includes('falling back to most recent scratchpad table'),
+      );
+      expect(fallbackFired).toBe(true);
+
+      await scratchpadManager.destroyAll();
+    });
+  });
+
+  describe('setPromptOverride', () => {
+    it('forwards the override string to the provider in place of buildLeaderPrompt', async () => {
+      // Spy provider that records the system prompt it was called with.
+      const seenSystem: string[] = [];
+      const provider: LLMProvider = {
+        name: 'spy',
+        async *chat(_messages, _tools, options) {
+          seenSystem.push(options?.system ?? '');
+          yield { type: 'text_delta', text: 'ok' };
+          yield { type: 'message_end', stopReason: 'end_turn' };
+        },
+      };
+
+      const leader = new LeaderAgent({
+        provider,
+        toolContext: mockToolContext(),
+        dataSources: [{ id: 'pg-main', name: 'Main DB', type: 'postgres' }],
+      });
+
+      const override = 'OVERRIDE_PROMPT_FOR_EVAL_HARNESS';
+      leader.setPromptOverride(override);
+      await collectEvents(leader, 'hi');
+      expect(seenSystem).toHaveLength(1);
+      expect(seenSystem[0]).toBe(override);
+
+      // Reverting to null restores the default builder output.
+      leader.setPromptOverride(null);
+      await collectEvents(leader, 'hi again');
+      expect(seenSystem).toHaveLength(2);
+      expect(seenSystem[1]).not.toBe(override);
+      // buildLeaderPrompt starts with a well-known role sentence; sanity-check
+      // that we got the real prompt back.
+      expect(seenSystem[1]).toContain("Lightboard's data exploration assistant");
+    });
+  });
 });

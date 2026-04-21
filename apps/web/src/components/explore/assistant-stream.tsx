@@ -12,7 +12,7 @@ import { TraceCluster } from './trace/trace-cluster';
 /**
  * A "trace part" is anything that belongs inside an editorial-log cluster:
  * tool calls and agent delegations. We treat runs of consecutive trace
- * parts as a single visual cluster with a shared dashed timeline.
+ * parts as a single visual cluster rendered by {@link TraceCluster}.
  */
 function isTracePart(p: MessagePart): boolean {
   return p.kind === 'tool_call' || p.kind === 'agent_delegation';
@@ -71,8 +71,10 @@ interface AssistantStreamProps {
  * Renders the assistant side of a turn by iterating over the ordered
  * {@link MessagePart}[] and emitting one block per part. Consecutive
  * tool_call / agent_delegation parts are grouped into a shared
- * {@link TraceCluster} with a dashed timeline; a single trace part gets
- * no cluster wrapper (per design — one row is not a log).
+ * {@link TraceCluster} — a collapsible editorial-log panel with a status
+ * dot + "Completed" / "Thinking" label + `N/N tool calls` count + chevron.
+ * Even a single tool row uses the panel so the visual language stays
+ * consistent across short and long traces.
  *
  * Suggestion parts are intentionally NOT rendered here — the caller
  * (`<Turn>`) filters them and renders a single `<SuggestionChips>` at
@@ -97,21 +99,46 @@ export function AssistantStream({ parts, isStreaming }: AssistantStreamProps) {
     <div className="flex flex-col gap-3">
       {groups.map((g) => {
         if (g.type === 'cluster') {
-          // Single trace row: no cluster wrapper — renders flat.
-          if (g.parts.length === 1) {
-            const part = g.parts[0]!;
-            return (
-              <div key={`solo-trace-${g.startIndex}`} className="ml-[40px]">
-                {part.kind === 'tool_call' && <ToolCallRow part={part} />}
-                {part.kind === 'agent_delegation' && (
-                  <AgentDelegationRow part={part} />
-                )}
-              </div>
-            );
+          // Every cluster — even a one-row cluster — wraps in TraceCluster
+          // so the editorial-log panel chrome (status dot, "Completed" /
+          // "Thinking" label, N/N count, chevron) is always present. The
+          // previous "one-row-renders-flat" carve-out produced a jarring
+          // inconsistency for short traces.
+          //
+          // Status + counts are derived from the rows themselves:
+          //   - A row is "running" iff it carries status: 'running'.
+          //   - totalCount counts every tool_call / agent_delegation row.
+          //   - doneCount is the complement of running.
+          //   - currentLabel is the first running row's label (or name).
+          let running = 0;
+          let done = 0;
+          let currentLabel: string | undefined;
+          for (const p of g.parts) {
+            const isRunning =
+              (p.kind === 'tool_call' || p.kind === 'agent_delegation') &&
+              p.status === 'running';
+            if (isRunning) {
+              running += 1;
+              if (!currentLabel) {
+                currentLabel =
+                  p.kind === 'tool_call'
+                    ? (p.label ?? p.name)
+                    : (p.task ?? p.agent);
+              }
+            } else {
+              done += 1;
+            }
           }
-          // Multi-row cluster: wrap in TraceCluster so the dashed rule joins them.
+          const clusterStatus: 'running' | 'done' =
+            running > 0 ? 'running' : 'done';
           return (
-            <TraceCluster key={`cluster-${g.startIndex}`}>
+            <TraceCluster
+              key={`cluster-${g.startIndex}`}
+              status={clusterStatus}
+              totalCount={g.parts.length}
+              doneCount={done}
+              {...(currentLabel ? { currentLabel } : {})}
+            >
               {g.parts.map((p, i) => (
                 <Fragment key={`${g.startIndex}-${i}`}>
                   {p.kind === 'tool_call' && <ToolCallRow part={p} />}
@@ -134,16 +161,29 @@ export function AssistantStream({ parts, isStreaming }: AssistantStreamProps) {
                 isActive={isStreaming && index === parts.length - 1}
               />
             );
-          case 'text':
+          case 'text': {
+            const textIsStreaming =
+              !!isStreaming &&
+              index === lastTextIndex &&
+              lastTextIndex === parts.length - 1;
+            // An empty, non-streaming text part is a ghost row — it renders
+            // as a 26px agent avatar next to an empty content area and
+            // sits awkwardly above the following trace cluster. These
+            // arise from leading/trailing whitespace deltas the model
+            // occasionally emits around tool calls. Skip them so the
+            // cluster panel reads as the first visible block after the
+            // preceding real text.
+            if (part.text.trim().length === 0 && !textIsStreaming) {
+              return null;
+            }
             return (
               <AgentMessage
                 key={`text-${index}`}
                 content={part.text}
-                isStreaming={
-                  !!isStreaming && index === lastTextIndex && lastTextIndex === parts.length - 1
-                }
+                isStreaming={textIsStreaming}
               />
             );
+          }
           case 'status':
             return (
               <div

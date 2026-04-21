@@ -185,6 +185,10 @@ export function Thread({
                 suggestions={[]}
                 onSuggestionClick={onSuggestionClick}
                 activeSuggestion={activeSuggestion}
+                // The first turn's user message is rendered by the page
+                // header — suppress Turn's own `<UserMessage>` so the
+                // prompt isn't printed twice.
+                isFirstTurn={i === 0}
               />
             ))}
           </div>

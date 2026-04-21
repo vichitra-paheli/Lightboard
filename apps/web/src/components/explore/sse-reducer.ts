@@ -23,7 +23,7 @@
  *   stamped with `parentAgent` so the renderer can indent them.
  */
 
-import type { MessagePart } from './chat-message';
+import type { MessagePart, NarrationBlock } from './chat-message';
 import type { ViewSpec } from '@lightboard/viz-core';
 import type { HtmlView } from '@/components/view-renderer';
 
@@ -66,6 +66,12 @@ export type SSEEventShape =
       viewSpec: HtmlView | ViewSpec;
       queryResult?: { rows?: Record<string, unknown>[] };
     }
+  /**
+   * Terminal narration block emitted once per turn. Carries the structured
+   * bullets + optional caveat that the UI renders below the assistant turn.
+   * Unlike `view_created`, this is not a part — it lives on the message.
+   */
+  | { type: 'narrate_ready'; narration: NarrationBlock }
   | { type: 'abort' }
   | { type: 'done' };
 
@@ -170,6 +176,21 @@ export function reduceParts(
     }
 
     case 'tool_start': {
+      // `await_tasks` is a control-plane wait, not a distinct piece of
+      // work. Hiding its row keeps the editorial log focused on the
+      // `dispatch_*` rows that represent the actual tasks — when the
+      // await resolves, its duration + per-task result summaries merge
+      // back into the matching dispatch rows (see `tool_end` below).
+      // Track start time so the merge can compute duration when the
+      // backend didn't send one.
+      if (event.name === 'await_tasks') {
+        const nextCtx: ReducerContext = {
+          ...ctx,
+          toolStartTimes: { ...ctx.toolStartTimes, [event.name]: Date.now() },
+        };
+        return { parts: basePartsForNonStatus, ctx: nextCtx };
+      }
+
       // Prefer the backend's explicit parentAgent (sub-agent bubble-up)
       // over the locally-tracked active-agent stack. The stack only moves
       // on agent_start/agent_end which don't fire in dispatch mode.
@@ -193,6 +214,168 @@ export function reduceParts(
     }
 
     case 'tool_end': {
+      // `dispatch_*` tool_end returns a task handle immediately — the
+      // actual work happens off-thread. We stash the returned task_id on
+      // the dispatch row but deliberately leave `status: 'running'` so
+      // the spinner stays up until the corresponding `await_tasks` merge
+      // lands. This is what produces the reference-image behavior: one
+      // row per dispatch, no await row, duration reflects the whole task.
+      if (event.name.startsWith('dispatch_')) {
+        let matchIndex = -1;
+        for (let i = basePartsForNonStatus.length - 1; i >= 0; i -= 1) {
+          const p = basePartsForNonStatus[i]!;
+          if (
+            p.kind === 'tool_call' &&
+            p.name === event.name &&
+            p.status === 'running'
+          ) {
+            matchIndex = i;
+            break;
+          }
+        }
+        // Clear the start-time mapping so a subsequent same-name dispatch
+        // doesn't pick up this row's clock.
+        const nextToolStartTimes = { ...ctx.toolStartTimes };
+        delete nextToolStartTimes[event.name];
+        const nextCtx: ReducerContext = { ...ctx, toolStartTimes: nextToolStartTimes };
+
+        if (matchIndex === -1) {
+          return { parts: basePartsForNonStatus, ctx: nextCtx };
+        }
+        const existing = basePartsForNonStatus[matchIndex]! as Extract<
+          MessagePart,
+          { kind: 'tool_call' }
+        >;
+        // Parse the handle {task_id, role, status, dispatched_at} so the
+        // await_tasks merge below can resolve by task id.
+        let taskId: string | undefined;
+        if (event.result) {
+          try {
+            const parsed = JSON.parse(event.result);
+            if (parsed && typeof parsed.task_id === 'string') {
+              taskId = parsed.task_id;
+            }
+          } catch {
+            /* handle parse errors silently — row stays running, which is fine */
+          }
+        }
+        // If the dispatch itself failed (should be rare — the handler
+        // only errors on bad input) flip to error so the user sees it.
+        if (event.isError) {
+          const updated: MessagePart = {
+            ...existing,
+            status: 'error',
+            ...(event.result !== undefined ? { result: String(event.result) } : {}),
+            ...(event.resultSummary !== undefined ? { resultSummary: event.resultSummary } : {}),
+          };
+          const nextParts = [
+            ...basePartsForNonStatus.slice(0, matchIndex),
+            updated,
+            ...basePartsForNonStatus.slice(matchIndex + 1),
+          ];
+          return { parts: nextParts, ctx: nextCtx };
+        }
+        const updated: MessagePart = {
+          ...existing,
+          // Deliberately keep status: 'running' until await_tasks resolves.
+          ...(taskId ? { taskId } : {}),
+        };
+        const nextParts = [
+          ...basePartsForNonStatus.slice(0, matchIndex),
+          updated,
+          ...basePartsForNonStatus.slice(matchIndex + 1),
+        ];
+        return { parts: nextParts, ctx: nextCtx };
+      }
+
+      // `await_tasks` tool_end: parse the per-task-id result map and
+      // merge each entry into its matching dispatch row. Drop the await
+      // row itself — it was never rendered in the first place (see the
+      // `tool_start` branch above), but we still need to clean up the
+      // toolStartTimes entry.
+      if (event.name === 'await_tasks') {
+        const start = ctx.toolStartTimes[event.name];
+        const awaitDuration =
+          event.durationMs ?? (start != null ? Date.now() - start : undefined);
+        const nextToolStartTimes = { ...ctx.toolStartTimes };
+        delete nextToolStartTimes[event.name];
+
+        let taskMap: Record<string, Record<string, unknown>> | null = null;
+        if (event.result && !event.isError) {
+          try {
+            const parsed = JSON.parse(event.result);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+              taskMap = parsed as Record<string, Record<string, unknown>>;
+            }
+          } catch {
+            /* no structured map — dispatches stay running, user sees a
+               graceful fallback rather than a crash */
+          }
+        }
+
+        // Also track rows seen on the most recent query so view parts
+        // that land via a dispatch_view task can inherit the data.
+        let nextLastQueryRows = ctx.lastQueryRows;
+
+        if (!taskMap) {
+          return {
+            parts: basePartsForNonStatus,
+            ctx: { ...ctx, toolStartTimes: nextToolStartTimes, lastQueryRows: nextLastQueryRows },
+          };
+        }
+
+        const nextParts = basePartsForNonStatus.map((p) => {
+          if (
+            p.kind !== 'tool_call' ||
+            !p.taskId ||
+            !Object.prototype.hasOwnProperty.call(taskMap, p.taskId)
+          ) {
+            return p;
+          }
+          const entry = taskMap[p.taskId]!;
+          const success = entry.success === true;
+          const role = typeof entry.role === 'string' ? entry.role : '';
+          let summary: string | undefined;
+          if (!success) {
+            summary = '→ error';
+          } else if (role === 'query') {
+            const ds = entry.data_summary as Record<string, unknown> | undefined;
+            const rc = ds && typeof ds.rowCount === 'number' ? ds.rowCount : null;
+            if (rc != null) {
+              summary = `→ ${rc.toLocaleString()} rows`;
+              // Surface the rows for legacy ViewSpec renderers that
+              // expect ctx.lastQueryRows.
+              if (Array.isArray(ds!.sampleRows)) {
+                nextLastQueryRows = ds!.sampleRows as Record<string, unknown>[];
+              }
+            }
+          } else if (role === 'view') {
+            summary = '→ view created';
+          } else if (role === 'insights') {
+            const data = entry.data as Record<string, unknown> | undefined;
+            if (data && Array.isArray(data.findings)) {
+              const n = (data.findings as unknown[]).length;
+              summary = `→ ${n} finding${n === 1 ? '' : 's'}`;
+            }
+          }
+
+          return {
+            ...p,
+            status: (success ? 'done' : 'error') as 'done' | 'error',
+            ...(awaitDuration !== undefined ? { durationMs: awaitDuration } : {}),
+            ...(summary ? { resultSummary: summary } : {}),
+          };
+        });
+
+        return {
+          parts: nextParts,
+          ctx: {
+            ...ctx,
+            toolStartTimes: nextToolStartTimes,
+            lastQueryRows: nextLastQueryRows,
+          },
+        };
+      }
       // Find the last running tool_call part matching this name. We scan
       // right-to-left so overlapping tools with the same name resolve in
       // LIFO order — matches how tool runs actually complete.
@@ -350,7 +533,45 @@ export function reduceParts(
         view: event.viewSpec,
         data,
       };
-      return { parts: [...basePartsForNonStatus, part], ctx };
+      // Dedupe / replace-in-place: the backend can emit `view_created` more
+      // than once for what the user experiences as a single view —
+      //   1. A view-agent's `create_view` tool_end bubbles up AND the
+      //      leader's `delegate_view` / `await_tasks` tool_end also carries
+      //      the same viewSpec, so the route emits twice.
+      //   2. The agent calls `create_view` then `modify_view` on the same
+      //      logical view, emitting two distinct but related spec payloads.
+      //
+      // In both cases the user wants ONE chart block, with the latest spec
+      // winning. Find the last `view` part in parts[] (scanning past trailing
+      // non-view parts so new post-chart text/tool rows don't confuse the
+      // replacement). If no prior view exists in this turn, just append.
+      let priorViewIdx = -1;
+      for (let i = basePartsForNonStatus.length - 1; i >= 0; i -= 1) {
+        if (basePartsForNonStatus[i]!.kind === 'view') {
+          priorViewIdx = i;
+          break;
+        }
+      }
+      if (priorViewIdx === -1) {
+        return { parts: [...basePartsForNonStatus, part], ctx };
+      }
+      // Replace the existing view part with the new spec. Keep the rest of
+      // parts[] (including any text/tool rows that landed between the old
+      // view and now — those belong to the same turn).
+      const replaced = [
+        ...basePartsForNonStatus.slice(0, priorViewIdx),
+        part,
+        ...basePartsForNonStatus.slice(priorViewIdx + 1),
+      ];
+      return { parts: replaced, ctx };
+    }
+
+    case 'narrate_ready': {
+      // Narration lives on the message, not on parts[] — the caller
+      // handles surfacing it. Parts are unchanged. We still strip a
+      // trailing status if one was sitting on the end, matching the
+      // "any real event clears status" contract.
+      return { parts: basePartsForNonStatus, ctx };
     }
 
     case 'abort': {
@@ -484,6 +705,37 @@ export function parseSSEJson(
           ? { queryResult: data.queryResult as { rows?: Record<string, unknown>[] } }
           : {}),
       };
+    case 'narrate_ready': {
+      if (!Array.isArray(data.bullets)) return null;
+      // Re-shape defensively — the server validates already, but parsing
+      // here protects against older backends that might drop keys.
+      const bullets: NarrationBlock['bullets'] = [];
+      for (const b of data.bullets) {
+        if (!b || typeof b !== 'object') return null;
+        const obj = b as Record<string, unknown>;
+        const rank = obj.rank;
+        const headline = obj.headline;
+        const body = obj.body;
+        if ((rank !== 1 && rank !== 2 && rank !== 3)
+          || typeof headline !== 'string'
+          || typeof body !== 'string') {
+          return null;
+        }
+        const value = typeof obj.value === 'string' ? obj.value : undefined;
+        bullets.push({
+          rank,
+          headline,
+          body,
+          ...(value ? { value } : {}),
+        });
+      }
+      bullets.sort((a, b) => a.rank - b.rank);
+      const narration: NarrationBlock = {
+        bullets,
+        ...(typeof data.caveat === 'string' && data.caveat ? { caveat: data.caveat } : {}),
+      };
+      return { type: 'narrate_ready', narration };
+    }
     case 'done':
       return { type: 'done' };
     default:
