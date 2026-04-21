@@ -145,4 +145,48 @@ describe('<Turn>', () => {
     expect(stream.children[1]?.textContent).toContain('run_sql');
     expect(stream.children[2]?.textContent).toContain('After tool.');
   });
+
+  it('renders the KEY TAKEAWAYS block below the stream when narration is set', () => {
+    const assistant: ChatMessageData = {
+      id: 'a',
+      role: 'assistant',
+      parts: [
+        { kind: 'text', text: 'Findings below.' },
+      ],
+      narration: {
+        bullets: [
+          { rank: 1, headline: 'Top region', value: '+12.4%', body: 'North led Q4.' },
+          { rank: 2, headline: 'East', body: 'Held steady.' },
+          { rank: 3, headline: 'West', body: 'Flat.' },
+        ],
+        caveat: 'Sample of 40 stores.',
+      },
+    };
+    const { container, getByText } = render(
+      <Turn userMessage={USER} assistantMessage={assistant} />,
+    );
+    // The takeaways eyebrow is in the DOM and the ranks render as 01/02/03.
+    expect(getByText(/Key takeaways/i)).toBeTruthy();
+    expect(getByText('01')).toBeTruthy();
+    expect(getByText('02')).toBeTruthy();
+    expect(getByText('03')).toBeTruthy();
+    // Signed value from bullet 1 shows.
+    expect(getByText('+12.4%')).toBeTruthy();
+    // Caveat banner appears with the interpretation-note label.
+    expect(container.textContent).toContain('Interpretation note');
+    expect(container.textContent).toContain('Sample of 40 stores.');
+  });
+
+  it('omits the KEY TAKEAWAYS block when narration is undefined', () => {
+    const assistant: ChatMessageData = {
+      id: 'a',
+      role: 'assistant',
+      parts: [{ kind: 'text', text: 'No narration here.' }],
+    };
+    const { container } = render(
+      <Turn userMessage={USER} assistantMessage={assistant} />,
+    );
+    expect(container.textContent).not.toContain('Key takeaways');
+    expect(container.textContent).not.toContain('Interpretation note');
+  });
 });
