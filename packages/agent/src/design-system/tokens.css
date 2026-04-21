@@ -1,0 +1,99 @@
+/*
+ * Lightboard design tokens — dark editorial canvas, warm amber accent.
+ * Generated from apps/web/src/styles/globals.css (:root block) which is the
+ * canonical in-repo copy of Lightboard-design/colors_and_type.css. Do not
+ * edit directly — the token-drift test in __tests__/token-drift.test.ts
+ * fails loudly if this file diverges from globals.css.
+ */
+:root {
+  /* ---------- Typography ---------- */
+  /* next/font/google exposes --font-display / --font-body / --font-mono with
+   * the actual CSS font-family names injected at build time. We intentionally
+   * leave the variables above untouched here so the fonts from next/font wire
+   * through; the rest of the design system uses these raw tokens by name. */
+
+  /* Type scale */
+  --text-eyebrow: 9.5px;
+  --text-micro: 10px;
+  --text-caption: 11px;
+  --text-small: 12px;
+  --text-body: 13px;
+  --text-message: 14px;
+  --text-message-l: 15px;
+  --text-chart-h: 22px;
+  --text-page-h: 26px;
+
+  /* Letter spacing */
+  --track-eyebrow: 0.14em;
+  --track-label: 0.10em;
+  --track-tight: -0.015em;
+
+  /* ---------- Color · Surfaces ---------- */
+  --bg-0: #08080A;
+  --bg-1: #09090B;
+  --bg-2: #0A0A0C;
+  --bg-3: #0C0C0F;
+  --bg-4: #0D0D10;
+  --bg-5: #101013;
+  --bg-6: #131317;
+  --bg-7: #18181C;
+
+  /* Borders */
+  --line-1: #17171B;
+  --line-2: #1A1A1E;
+  --line-3: #1E1E22;
+  --line-4: #26262C;
+  --line-5: #2A2A30;
+
+  /* ---------- Color · Ink ---------- */
+  --ink-1: #EDEDEE;
+  --ink-2: #BDBDC4;
+  --ink-3: #8A8A92;
+  --ink-4: #6B6B73;
+  --ink-5: #55555C;
+  --ink-6: #3E3E45;
+
+  /* ---------- Color · Accent (amber editorial) ---------- */
+  --accent: #F2C265;
+  --accent-warm: #E89B52;
+  --accent-deep: #D97A44;
+  --accent-ink: #D9A441;
+  --accent-bg: #16120B;
+  --accent-border: #3B2E14;
+
+  /* ---------- Color · Semantic (tool-call kinds) ---------- */
+  --kind-schema: #8AB4B8;
+  --kind-query: #E89B52;
+  --kind-compute: #B08CA8;
+  --kind-filter: #D9A441;
+  --kind-viz: #F2C265;
+  --kind-narrate: #7DB469;
+
+  /* ---------- Color · Sigil palette (L I G H T B O A R D) ---------- */
+  --sigil-1: #F4A261;
+  --sigil-2: #E76F51;
+  --sigil-3: #E9C46A;
+  --sigil-4: #D9A441;
+  --sigil-5: #EDEDEE;
+  --sigil-6: #8AB4B8;
+  --sigil-7: #5E8B95;
+  --sigil-8: #6A7BA2;
+  --sigil-9: #B08CA8;
+  --sigil-10: #D4846F;
+
+  /* ---------- Shadow / glow ---------- */
+  --shadow-pop: 0 4px 14px rgba(237, 237, 238, 0.12);
+  --shadow-panel: 0 12px 40px rgba(0, 0, 0, 0.45);
+  --glow-accent: 0 0 0 3px rgba(232, 155, 82, 0.15);
+  --glow-accent-wide: 0 0 0 6px rgba(232, 155, 82, 0.05);
+
+  /* ---------- Motion ---------- */
+  --ease-out-quint: cubic-bezier(.2, .8, .2, 1);
+  --ease-draw: cubic-bezier(.6, .1, .2, 1);
+  --dur-fast: 150ms;
+  --dur-base: 180ms;
+  --dur-med: 260ms;
+  --dur-slow: 420ms;
+  --dur-chart: 720ms;
+  --dur-sigil: 900ms;
+}

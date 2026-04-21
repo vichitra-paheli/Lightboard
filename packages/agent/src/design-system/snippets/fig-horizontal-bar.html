@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<style>
+  /* PASTE tokens.css :root block verbatim here — the snippet below assumes it. */
+  :root {
+    --font-display: 'Space Grotesk', system-ui, sans-serif;
+    --font-body: 'Inter', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+    /* ... rest of tokens.css ... */
+  }
+  body { margin:0; background:var(--bg-0); color:var(--ink-1); font-family:var(--font-body); padding:32px 40px; }
+  .fig { max-width: 880px; margin: 0 auto; position: relative; }
+  .fig__eyebrow { font-family:var(--font-mono); font-size:var(--text-eyebrow); letter-spacing:var(--track-eyebrow); text-transform:uppercase; color:var(--ink-4); margin-bottom: 6px; }
+  .fig__title { font-family:var(--font-display); font-size:var(--text-chart-h); font-weight:600; letter-spacing:var(--track-tight); color:var(--ink-1); line-height:1.2; margin:0; }
+  .fig__sub { font-family:var(--font-body); font-size:12.5px; color:var(--ink-3); margin:6px 0 22px; }
+  .fig__grid { display:grid; grid-template-columns:24px 120px 1fr 68px; gap:10px 14px; align-items:center; position:relative; padding: 14px 0; }
+  .fig__grid::before { content:''; position:absolute; left:158px; right:68px; top:50%; border-top:1px dashed var(--ink-5); pointer-events:none; }
+  .fig__rank { font-family:var(--font-mono); font-variant-numeric:tabular-nums; font-size:var(--text-micro); color:var(--ink-5); }
+  .fig__name { font-family:var(--font-body); font-size:var(--text-small); color:var(--ink-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .fig__bar-track { position:relative; height:10px; }
+  .fig__bar { position:absolute; left:0; top:0; bottom:0; height:10px; border-radius:2px; width:0; transition:width var(--dur-chart) var(--ease-draw); }
+  .fig__bar.is-outlier { box-shadow: 0 0 0 1px var(--accent); }
+  .fig__val { font-family:var(--font-mono); font-variant-numeric:tabular-nums; font-size:var(--text-small); color:var(--ink-2); text-align:right; }
+  .fig__val.is-outlier { color:var(--accent); font-weight:600; }
+  .fig__foot { display:flex; justify-content:space-between; font-family:var(--font-mono); font-size:var(--text-micro); letter-spacing:var(--track-label); text-transform:uppercase; color:var(--ink-5); margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line-2); }
+  .fig__png { position:fixed; top:16px; right:16px; font-family:var(--font-mono); font-size:var(--text-micro); letter-spacing:var(--track-label); text-transform:uppercase; color:var(--ink-3); background:var(--bg-5); border:1px solid var(--line-3); border-radius:999px; padding:6px 12px; cursor:pointer; z-index:20; }
+  .fig__png:hover { color:var(--ink-1); border-color:var(--line-5); }
+</style>
+</head>
+<body>
+<button class="fig__png" id="png-btn">PNG</button>
+<div class="fig">
+  <div class="fig__eyebrow">FIGURE 01 · <!-- CATEGORY --></div>
+  <h1 class="fig__title"><!-- FINDING HEADLINE --></h1>
+  <p class="fig__sub"><!-- QUALIFICATION --></p>
+  <div class="fig__grid" id="grid"></div>
+  <div class="fig__foot">
+    <span>SOURCE · <!-- SOURCE --> · <!-- PERIOD --></span>
+    <span>N = <!-- ROWCOUNT --> · UPDATED <!-- DATE --></span>
+  </div>
+</div>
+<script>
+  // Hardcode rows inline — the iframe has no fetch access.
+  const DATA = [/* <!-- DATA JSON -->
+    { name: 'G Gambhir', value: 11.59, outlier: true },
+    { name: 'V Kohli',   value:  8.42 },
+    { name: 'R Sharma',  value:  7.81 },
+    { name: 'S Dhawan',  value:  5.34 },
+    { name: 'K Rahul',   value:  4.92 },
+  */];
+  // Copper/warm magnitude ramp. Value thresholds are illustrative — adjust the
+  // breakpoints to fit the dataset range while keeping the ramp order intact.
+  const MAX = Math.max(1, ...DATA.map(function (d) { return Math.abs(d.value); }));
+  function rampColor(v) {
+    var r = Math.abs(v) / MAX;
+    if (r > 0.80) return '#F2C265';
+    if (r > 0.55) return '#E89B52';
+    if (r > 0.35) return '#D97A44';
+    return '#B85C3A';
+  }
+  function signed(v) { return (v > 0 ? '+' : '') + v.toFixed(2); }
+  var grid = document.getElementById('grid');
+  DATA.forEach(function (d, i) {
+    var rank = String(i + 1).padStart(2, '0');
+    var pct = (Math.abs(d.value) / MAX) * 100;
+    var row = document.createElement('div');
+    row.style.display = 'contents';
+    row.innerHTML = '' +
+      '<div class="fig__rank">' + rank + '</div>' +
+      '<div class="fig__name">' + d.name + '</div>' +
+      '<div class="fig__bar-track"><div class="fig__bar' + (d.outlier ? ' is-outlier' : '') + '" data-w="' + pct.toFixed(2) + '%" style="background:' + (d.outlier ? 'var(--accent)' : rampColor(d.value)) + '"></div></div>' +
+      '<div class="fig__val' + (d.outlier ? ' is-outlier' : '') + '">' + signed(d.value) + '</div>';
+    grid.appendChild(row);
+  });
+  // Wait for Google Fonts before animating bars to avoid FOUT jitter.
+  (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(function () {
+    requestAnimationFrame(function () {
+      var bars = document.querySelectorAll('.fig__bar');
+      bars.forEach(function (b, i) { setTimeout(function () { b.style.width = b.dataset.w; }, i * 32); });
+    });
+  });
+  // PNG export — hide the button before capture so it isn't in the output.
+  document.getElementById('png-btn').onclick = function () {
+    var btn = this;
+    btn.style.display = 'none';
+    html2canvas(document.body, { backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--bg-0').trim() || '#08080A' })
+      .then(function (canvas) {
+        var a = document.createElement('a');
+        a.href = canvas.toDataURL('image/png');
+        a.download = 'lightboard-figure.png';
+        a.click();
+        btn.style.display = '';
+      })
+      .catch(function () { btn.style.display = ''; });
+  };
+</script>
+</body>
+</html>

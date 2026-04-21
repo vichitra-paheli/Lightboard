@@ -1,5 +1,6 @@
 import type { AgentDataSource, AgentEvent } from '../agent';
 import { ConversationManager } from '../conversation/manager';
+import type { ChartHint } from '../design-system';
 import { classifyTool, formatEnd, formatStart } from '../events/tool-event-formatter';
 import { buildLeaderPrompt } from '../prompt/leader-prompt';
 import type { LLMProvider, Message, ToolCallResult } from '../provider/types';
@@ -95,6 +96,104 @@ function buildDataSummary(data: Record<string, unknown>): Record<string, unknown
     : [];
 
   return { columns, rowCount, sampleRows };
+}
+
+/** Heuristic: does a column name or value look date-like? */
+const DATE_NAME_RE = /\b(date|time|day|month|year|week|quarter|hour|minute|ts|timestamp|created|updated)\b/i;
+const ISO_DATE_RE = /^\d{4}-\d{2}(?:-\d{2})?/;
+
+/**
+ * Shape of the inferred column summary used by {@link inferChartHint}. Matches
+ * what {@link buildDataSummary} emits — name + primitive type string — plus
+ * (optional) a sample value so we can probe for ISO dates.
+ */
+export interface InferChartHintColumn {
+  name: string;
+  /** Primitive type returned by `typeof` on the first sample row. */
+  type: string;
+  /** Optional first sample value, used to detect date strings. */
+  sample?: unknown;
+}
+
+/**
+ * Infer a {@link ChartHint} from a compact data summary. Run locally in the
+ * leader before `dispatch_view` so the view specialist sees a snippet matching
+ * the query's actual shape. Heuristics (not ML):
+ *
+ *   - 1 numeric only                                   → `stat`
+ *   - 1 numeric + 1 date/time                          → `line`
+ *   - multiple numerics + date                         → `line`
+ *   - 1 numeric + 1 categorical (<=10 rows / buckets)  → `horizontal-bar`
+ *   - parts-of-whole (<=6 categories, single numeric)  → `donut`
+ *   - anything else                                    → `auto`
+ *
+ * Cheap, deterministic, and wrong-sometimes — that's fine. The view prompt
+ * always falls back to `auto` if we can't decide, which still includes the
+ * canonical horizontal-bar snippet as a reference.
+ */
+export function inferChartHint(
+  columns: InferChartHintColumn[],
+  rowCount: number,
+): ChartHint {
+  if (columns.length === 0 || rowCount === 0) return 'auto';
+
+  const isDate = (c: InferChartHintColumn): boolean => {
+    if (DATE_NAME_RE.test(c.name)) return true;
+    if (c.type === 'string' && typeof c.sample === 'string' && ISO_DATE_RE.test(c.sample)) return true;
+    if (c.type === 'object' && c.sample instanceof Date) return true;
+    return false;
+  };
+
+  const numerics = columns.filter((c) => c.type === 'number');
+  const dates = columns.filter((c) => isDate(c));
+  const categoricals = columns.filter((c) => c.type === 'string' && !isDate(c));
+
+  // 1 numeric only — stat card.
+  if (columns.length === 1 && numerics.length === 1 && rowCount === 1) {
+    return 'stat';
+  }
+
+  // Time series (one or more numerics against a date axis).
+  if (dates.length >= 1 && numerics.length >= 1) {
+    return 'line';
+  }
+
+  // Parts-of-whole — small N, one categorical + one numeric.
+  if (
+    numerics.length === 1 &&
+    categoricals.length === 1 &&
+    rowCount >= 2 &&
+    rowCount <= 6
+  ) {
+    return 'donut';
+  }
+
+  // Ranked comparison — one categorical + one numeric, more than a handful.
+  if (numerics.length >= 1 && categoricals.length >= 1 && rowCount <= 30) {
+    return 'horizontal-bar';
+  }
+
+  return 'auto';
+}
+
+const KNOWN_CHART_HINTS: ReadonlySet<ChartHint> = new Set([
+  'horizontal-bar',
+  'vertical-bar',
+  'line',
+  'donut',
+  'stat',
+  'auto',
+]);
+
+/**
+ * Coerce an untrusted string into a known {@link ChartHint} or return
+ * `undefined` if it isn't in the allowlist. Lets the leader accept an
+ * explicit `chart_hint` on `dispatch_view` without risking a freeform value
+ * leaking into the view prompt.
+ */
+function normalizeChartHint(raw: unknown): ChartHint | undefined {
+  if (typeof raw !== 'string') return undefined;
+  return KNOWN_CHART_HINTS.has(raw as ChartHint) ? (raw as ChartHint) : undefined;
 }
 
 /** Outcome of running a single sub-agent task end-to-end. */
@@ -672,10 +771,34 @@ export class LeaderAgent {
         } catch { /* fallback to empty summary */ }
       }
 
+      // chart_hint resolution order:
+      //   1. Explicit hint from the leader's dispatch_view call.
+      //   2. Inferred from the data summary (column types + row count).
+      //   3. 'auto' — the view prompt falls back to horizontal-bar + stat.
+      const explicitHint = typeof input.chart_hint === 'string' ? input.chart_hint : undefined;
+      const summaryCols = Array.isArray(dataSummary?.columns)
+        ? (dataSummary!.columns as Array<{ name?: unknown; type?: unknown }>)
+        : [];
+      const sampleRow =
+        Array.isArray(dataSummary?.sampleRows) && dataSummary!.sampleRows.length > 0
+          ? (dataSummary!.sampleRows as Array<Record<string, unknown>>)[0]
+          : undefined;
+      const rowCount =
+        typeof dataSummary?.rowCount === 'number' ? (dataSummary!.rowCount as number) : 0;
+      const inferCols: InferChartHintColumn[] = summaryCols
+        .map((c) => ({
+          name: typeof c?.name === 'string' ? c.name : '',
+          type: typeof c?.type === 'string' ? c.type : 'unknown',
+          sample: sampleRow && typeof c?.name === 'string' ? sampleRow[c.name] : undefined,
+        }))
+        .filter((c) => !!c.name);
+      const inferred = inferChartHint(inferCols, rowCount);
+      const chartHint: ChartHint = normalizeChartHint(explicitHint) ?? inferred;
+
       const task: AgentTask = {
         id: `task_${Date.now()}`,
         instruction,
-        context: { dataSummary: dataSummary ?? {} },
+        context: { dataSummary: dataSummary ?? {}, chartHint },
       };
 
       return { result: await agent.run(task) };
