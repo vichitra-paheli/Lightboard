@@ -1,0 +1,59 @@
+# Seed eval question set. Credentials live in env (LIGHTBOARD_EVAL_PG_URL) —
+# NEVER commit connection strings here.
+#
+# `dataSource` is a human-readable tag for log diffing. The harness wires
+# every question to the single Postgres instance configured via env; whether
+# a given question returns real data depends on that DB's schema.
+#
+# `expect` fields are loose hints used by the scorer. Unset fields are
+# ignored.
+#
+# Add a question: copy an entry, kebab-case the slug, write the prompt.
+
+- slug: top-batters-tsr
+  question: Show me the top 10 batters by True Strike Rate in IPL since 2014 with at least 500 balls faced
+  dataSource: cricket
+  expect:
+    chart: horizontal_bar
+    hasCaveat: true
+
+- slug: sales-peak
+  question: When did sales peak and by how much?
+  dataSource: retail
+  expect:
+    chart: line
+
+- slug: monthly-revenue-yoy
+  question: Monthly revenue for 2024 with a year-over-year comparison
+  dataSource: retail
+  expect:
+    chart: line
+    multiSeries: true
+
+- slug: region-outliers
+  question: Which regions are outliers on conversion rate?
+  dataSource: retail
+  expect:
+    hasCaveat: true
+
+- slug: revenue-by-category-channel
+  question: Revenue by product category, split by channel
+  dataSource: retail
+  expect:
+    chart: grouped_bar
+
+- slug: schema-doc-generation
+  question: __SCHEMA_DOC_BOOTSTRAP__
+  dataSource: cricket
+  expect:
+    hasSchemaDoc: true
+
+# Delta chart — tests whether the view agent draws a dashed baseline rule
+# when the metric is a signed gap vs expectation. The reference figure in
+# Lightboard-design/Lightboard Explore.html uses this exact framing.
+- slug: batters-vs-model
+  question: Show me the top 10 IPL batters since 2014 by True Strike Rate, defined as (actual runs minus expected xruns) per 100 balls. Minimum 500 balls faced. Highlight the biggest outlier.
+  dataSource: cricket
+  expect:
+    chart: horizontal_bar
+    hasCaveat: true

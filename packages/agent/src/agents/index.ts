@@ -3,6 +3,8 @@ export { ViewAgent } from './view-agent';
 export { InsightsAgent } from './insights-agent';
 export {
   LeaderAgent,
+  inferChartHint,
+  type InferChartHintColumn,
   type LeaderAgentConfig,
   type LeaderProviderMap,
   type LeaderMaxTokensMap,
@@ -10,6 +12,7 @@ export {
 export type {
   SubAgent,
   SubAgentConfig,
+  SubAgentEventCallback,
   SubAgentRole,
   AgentTask,
   SubAgentResult,

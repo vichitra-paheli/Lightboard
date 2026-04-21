@@ -183,6 +183,34 @@ describe('reduceParts', () => {
     });
   });
 
+  it('Fixture 6b: two view_created events for the same logical view replace, not stack', () => {
+    // The backend can fire `view_created` more than once per view:
+    //   - create_view bubbles up from the view-agent, AND
+    //   - delegate_view / await_tasks also re-emit the same viewSpec.
+    // The UI must render ONE chart block, with the newest spec winning.
+    const firstHtml = {
+      title: 'Top batters',
+      description: 'draft',
+      sql: 'SELECT 1',
+      html: '<html>v1</html>',
+    };
+    const secondHtml = {
+      ...firstHtml,
+      html: '<html>v2 — tweaked after modify_view</html>',
+    };
+    const parts = run([
+      { type: 'view_created', viewSpec: firstHtml },
+      { type: 'view_created', viewSpec: secondHtml },
+    ]);
+
+    // Exactly one view part — the second spec replaced the first.
+    const views = parts.filter((p) => p.kind === 'view');
+    expect(views).toHaveLength(1);
+    expect(
+      (views[0] as Extract<MessagePart, { kind: 'view' }>).view,
+    ).toBe(secondHtml);
+  });
+
   it('Fixture 7: view_created with a legacy ViewSpec picks up rows from prior run_sql', () => {
     // A ViewSpec is anything without an `html` property. Keep it minimal —
     // the reducer doesn't care about the full spec contents.
@@ -304,6 +332,187 @@ describe('reduceParts', () => {
     expect(texts[0]?.text).toBe('Before');
     expect(texts[1]?.text).toBe('After');
   });
+
+  // Dispatch + await merge — the editorial log renders ONE row per
+  // dispatch_*, no await_tasks row, and the dispatch row picks up the
+  // duration + resultSummary from the eventual await resolution.
+  describe('dispatch_* + await_tasks merge', () => {
+    it('a single dispatch_query + await resolves into one "done" dispatch row with row count', () => {
+      const parts = run([
+        { type: 'tool_start', name: 'dispatch_query' },
+        {
+          type: 'tool_end',
+          name: 'dispatch_query',
+          result: JSON.stringify({
+            task_id: 'task_query_1',
+            role: 'query',
+            status: 'dispatched',
+            dispatched_at: 1,
+          }),
+          durationMs: 0,
+        },
+        { type: 'tool_start', name: 'await_tasks' },
+        {
+          type: 'tool_end',
+          name: 'await_tasks',
+          result: JSON.stringify({
+            task_query_1: {
+              success: true,
+              role: 'query',
+              explanation: 'ok',
+              data_summary: { rowCount: 412, columns: [], sampleRows: [] },
+            },
+          }),
+          durationMs: 850,
+        },
+      ]);
+
+      // Exactly one tool_call part (no await_tasks row).
+      const toolParts = parts.filter((p) => p.kind === 'tool_call');
+      expect(toolParts).toHaveLength(1);
+      expect(toolParts[0]).toMatchObject({
+        kind: 'tool_call',
+        name: 'dispatch_query',
+        status: 'done',
+        durationMs: 850,
+        resultSummary: '→ 412 rows',
+        taskId: 'task_query_1',
+      });
+    });
+
+    it('keeps the dispatch row in running state between dispatch_end and await_end', () => {
+      // This is the visual contract: while the task is still off in the
+      // background, the user sees a spinner on the dispatch row, NOT a
+      // grey-done row with 0ms.
+      let parts: MessagePart[] = [];
+      let ctx = createReducerContext();
+      const steps: SSEEventShape[] = [
+        { type: 'tool_start', name: 'dispatch_query' },
+        {
+          type: 'tool_end',
+          name: 'dispatch_query',
+          result: JSON.stringify({ task_id: 'task_query_1', role: 'query' }),
+          durationMs: 0,
+        },
+      ];
+      for (const ev of steps) {
+        const next = reduceParts(parts, ev, ctx);
+        parts = next.parts;
+        ctx = next.ctx;
+      }
+      const toolParts = parts.filter((p) => p.kind === 'tool_call');
+      expect(toolParts).toHaveLength(1);
+      expect(toolParts[0]).toMatchObject({
+        kind: 'tool_call',
+        name: 'dispatch_query',
+        status: 'running',
+        taskId: 'task_query_1',
+      });
+      // No await_tasks row appeared.
+      expect(toolParts.every((p) => p.name !== 'await_tasks')).toBe(true);
+    });
+
+    it('parallel dispatch_query + dispatch_view merged by a single await resolve each row independently', () => {
+      const parts = run([
+        { type: 'tool_start', name: 'dispatch_query' },
+        {
+          type: 'tool_end',
+          name: 'dispatch_query',
+          result: JSON.stringify({ task_id: 'task_query_1', role: 'query' }),
+          durationMs: 0,
+        },
+        { type: 'tool_start', name: 'dispatch_view' },
+        {
+          type: 'tool_end',
+          name: 'dispatch_view',
+          result: JSON.stringify({ task_id: 'task_view_1', role: 'view' }),
+          durationMs: 0,
+        },
+        { type: 'tool_start', name: 'await_tasks' },
+        {
+          type: 'tool_end',
+          name: 'await_tasks',
+          result: JSON.stringify({
+            task_query_1: {
+              success: true,
+              role: 'query',
+              data_summary: { rowCount: 10, columns: [], sampleRows: [] },
+            },
+            task_view_1: { success: true, role: 'view' },
+          }),
+          durationMs: 1200,
+        },
+      ]);
+
+      const toolParts = parts.filter(
+        (p) => p.kind === 'tool_call',
+      ) as Extract<MessagePart, { kind: 'tool_call' }>[];
+      expect(toolParts).toHaveLength(2);
+      expect(toolParts[0]).toMatchObject({
+        name: 'dispatch_query',
+        status: 'done',
+        durationMs: 1200,
+        resultSummary: '→ 10 rows',
+      });
+      expect(toolParts[1]).toMatchObject({
+        name: 'dispatch_view',
+        status: 'done',
+        durationMs: 1200,
+        resultSummary: '→ view created',
+      });
+    });
+
+    it('a failed task inside await marks its dispatch row as error', () => {
+      const parts = run([
+        { type: 'tool_start', name: 'dispatch_query' },
+        {
+          type: 'tool_end',
+          name: 'dispatch_query',
+          result: JSON.stringify({ task_id: 'task_query_1', role: 'query' }),
+          durationMs: 0,
+        },
+        { type: 'tool_start', name: 'await_tasks' },
+        {
+          type: 'tool_end',
+          name: 'await_tasks',
+          result: JSON.stringify({
+            task_query_1: {
+              success: false,
+              role: 'query',
+              error: 'timeout',
+            },
+          }),
+          durationMs: 30000,
+        },
+      ]);
+
+      const toolParts = parts.filter((p) => p.kind === 'tool_call');
+      expect(toolParts).toHaveLength(1);
+      expect(toolParts[0]).toMatchObject({
+        kind: 'tool_call',
+        name: 'dispatch_query',
+        status: 'error',
+        durationMs: 30000,
+        resultSummary: '→ error',
+      });
+    });
+
+    it('await with no prior dispatch is a no-op (no parts produced or crashed)', () => {
+      const parts = run([
+        { type: 'text', text: 'hello' },
+        { type: 'tool_start', name: 'await_tasks' },
+        {
+          type: 'tool_end',
+          name: 'await_tasks',
+          result: '{}',
+          durationMs: 5,
+        },
+      ]);
+      // Text survives, no tool_call rows.
+      expect(parts).toHaveLength(1);
+      expect(parts[0]).toMatchObject({ kind: 'text', text: 'hello' });
+    });
+  });
 });
 
 describe('createReducer', () => {
@@ -363,5 +572,67 @@ describe('parseSSEJson', () => {
     // Missing required fields.
     expect(parseSSEJson('text', '{"notText":1}')).toBeNull();
     expect(parseSSEJson('tool_start', '{}')).toBeNull();
+  });
+
+  describe('narrate_ready', () => {
+    const sample = JSON.stringify({
+      bullets: [
+        { rank: 2, headline: 'Second', body: 'mid-pack finding' },
+        { rank: 1, headline: 'First', value: '+11.59', body: 'big one' },
+        { rank: 3, headline: 'Third', body: 'also-ran' },
+      ],
+      caveat: 'Sample of 40.',
+    });
+
+    it('parses into a typed narrate_ready event with bullets sorted by rank', () => {
+      const parsed = parseSSEJson('narrate_ready', sample);
+      expect(parsed).not.toBeNull();
+      if (parsed?.type !== 'narrate_ready') throw new Error('wrong variant');
+      expect(parsed.narration.bullets.map((b) => b.rank)).toEqual([1, 2, 3]);
+      expect(parsed.narration.bullets[0]!.value).toBe('+11.59');
+      expect(parsed.narration.caveat).toBe('Sample of 40.');
+    });
+
+    it('drops payloads where a bullet is missing a required field', () => {
+      const bad = JSON.stringify({
+        bullets: [
+          { rank: 1, body: 'no headline' },
+          { rank: 2, headline: 'Second', body: 'ok' },
+          { rank: 3, headline: 'Third', body: 'ok' },
+        ],
+      });
+      expect(parseSSEJson('narrate_ready', bad)).toBeNull();
+    });
+
+    it('drops payloads where bullets is not an array', () => {
+      expect(parseSSEJson('narrate_ready', '{"bullets":42}')).toBeNull();
+      expect(parseSSEJson('narrate_ready', '{}')).toBeNull();
+    });
+
+    it('omits caveat when the server sent an empty string', () => {
+      const payload = JSON.stringify({
+        bullets: [
+          { rank: 1, headline: 'a', body: 'A' },
+          { rank: 2, headline: 'b', body: 'B' },
+          { rank: 3, headline: 'c', body: 'C' },
+        ],
+        caveat: '',
+      });
+      const parsed = parseSSEJson('narrate_ready', payload);
+      expect(parsed?.type).toBe('narrate_ready');
+      if (parsed?.type !== 'narrate_ready') throw new Error('wrong variant');
+      expect(parsed.narration.caveat).toBeUndefined();
+    });
+
+    it('does not mutate parts[] when reduced', () => {
+      const before: MessagePart[] = [
+        { kind: 'text', text: 'existing text' },
+      ];
+      const parsed = parseSSEJson('narrate_ready', sample);
+      expect(parsed).not.toBeNull();
+      const reducer = createReducer();
+      const after = reducer.apply(parsed!, before);
+      expect(after).toEqual(before);
+    });
   });
 });

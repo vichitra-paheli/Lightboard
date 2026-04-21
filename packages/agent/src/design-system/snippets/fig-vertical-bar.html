@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* PASTE tokens.css :root block verbatim here. */
+  body { margin:0; background:var(--bg-0); color:var(--ink-1); font-family:var(--font-body); padding:32px 40px; }
+  .fig { max-width:880px; margin:0 auto; position:relative; }
+  .fig__eyebrow { font-family:var(--font-mono); font-size:var(--text-eyebrow); letter-spacing:var(--track-eyebrow); text-transform:uppercase; color:var(--ink-4); margin-bottom:6px; }
+  .fig__title { font-family:var(--font-display); font-size:var(--text-chart-h); font-weight:600; letter-spacing:var(--track-tight); color:var(--ink-1); margin:0; line-height:1.2; }
+  .fig__sub { font-family:var(--font-body); font-size:12.5px; color:var(--ink-3); margin:6px 0 28px; }
+  .bars { display:grid; grid-auto-flow:column; grid-auto-columns:1fr; gap:12px; height:220px; align-items:end; position:relative; padding: 0 0 30px; border-bottom: 1px dashed var(--ink-5); }
+  .bar { display:flex; flex-direction:column; align-items:center; justify-content:flex-end; position:relative; }
+  .bar__fill { width:60%; max-width:48px; min-height:1px; border-radius:2px 2px 0 0; transform-origin:bottom; transform:scaleY(0); transition:transform var(--dur-chart) var(--ease-draw); }
+  .bar__fill.is-outlier { box-shadow:0 0 0 1px var(--accent); }
+  .bar__label { font-family:var(--font-mono); font-variant-numeric:tabular-nums; font-size:var(--text-micro); color:var(--ink-4); margin-top:8px; position:absolute; bottom:-26px; letter-spacing:var(--track-label); text-transform:uppercase; }
+  .bar__val { font-family:var(--font-mono); font-variant-numeric:tabular-nums; font-size:var(--text-micro); color:var(--ink-3); position:absolute; top:-16px; }
+  .bar__val.is-outlier { color:var(--accent); font-weight:600; }
+  .fig__foot { display:flex; justify-content:space-between; font-family:var(--font-mono); font-size:var(--text-micro); letter-spacing:var(--track-label); text-transform:uppercase; color:var(--ink-5); margin-top:36px; padding-top:12px; border-top:1px solid var(--line-2); }
+</style>
+</head>
+<body>
+<div class="fig">
+  <div class="fig__eyebrow">FIGURE 01 · <!-- CATEGORY --></div>
+  <h1 class="fig__title"><!-- FINDING HEADLINE --></h1>
+  <p class="fig__sub"><!-- QUALIFICATION --></p>
+  <div class="bars" id="bars"></div>
+  <div class="fig__foot">
+    <span>SOURCE · <!-- SOURCE --> · <!-- PERIOD --></span>
+    <span>N = <!-- ROWCOUNT --> · UPDATED <!-- DATE --></span>
+  </div>
+</div>
+<script>
+  const DATA = [/* <!-- DATA JSON --> { name: 'Q1', value: 42.1 }, ... */];
+  const MAX = Math.max(1, ...DATA.map(function (d) { return Math.abs(d.value); }));
+  function ramp(v) { var r = Math.abs(v) / MAX; if (r > 0.80) return '#F2C265'; if (r > 0.55) return '#E89B52'; if (r > 0.35) return '#D97A44'; return '#B85C3A'; }
+  function signed(v) { return (v > 0 ? '+' : '') + (Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(2)); }
+  var bars = document.getElementById('bars');
+  DATA.forEach(function (d, i) {
+    var scale = (Math.abs(d.value) / MAX);
+    var wrap = document.createElement('div'); wrap.className = 'bar';
+    wrap.innerHTML =
+      '<div class="bar__val' + (d.outlier ? ' is-outlier' : '') + '">' + signed(d.value) + '</div>' +
+      '<div class="bar__fill' + (d.outlier ? ' is-outlier' : '') + '" data-s="' + scale.toFixed(3) + '" style="height:100%; background:' + (d.outlier ? 'var(--accent)' : ramp(d.value)) + '"></div>' +
+      '<div class="bar__label">' + d.name + '</div>';
+    bars.appendChild(wrap);
+  });
+  (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(function () {
+    requestAnimationFrame(function () {
+      document.querySelectorAll('.bar__fill').forEach(function (f, i) {
+        setTimeout(function () { f.style.transform = 'scaleY(' + f.dataset.s + ')'; }, i * 32);
+      });
+    });
+  });
+</script>
+</body>
+</html>

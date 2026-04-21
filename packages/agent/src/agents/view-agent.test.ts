@@ -229,6 +229,53 @@ describe('ViewAgent', () => {
     expect(results[0]!.success).toBe(true);
   });
 
+  it('fires onEvent with enriched tool_start and tool_end events', async () => {
+    const captured: Array<{ type: string; name: string; kind?: string; label?: string; resultSummary?: string }> = [];
+
+    const agent = new ViewAgent({
+      provider: mockProvider([
+        [
+          { type: 'tool_call_start', id: 'tc_1', name: 'create_view' },
+          {
+            type: 'tool_call_end',
+            id: 'tc_1',
+            name: 'create_view',
+            input: {
+              title: 'Sales by Region',
+              sql: 'SELECT region, SUM(amount) FROM orders GROUP BY region',
+              html: '<html><body>chart</body></html>',
+            },
+          },
+          { type: 'message_end', stopReason: 'tool_use' },
+        ],
+        [
+          { type: 'text_delta', text: 'View ready.' },
+          { type: 'message_end', stopReason: 'end_turn' },
+        ],
+      ]),
+      toolRouter: new ToolRouter(mockToolContext()),
+      onEvent: (event) => {
+        captured.push({
+          type: event.type,
+          name: event.name,
+          ...('kind' in event ? { kind: event.kind } : {}),
+          ...('label' in event ? { label: event.label } : {}),
+          ...('resultSummary' in event ? { resultSummary: event.resultSummary } : {}),
+        });
+      },
+    });
+
+    await agent.run(createViewTask());
+
+    const startEvent = captured.find((e) => e.type === 'tool_start');
+    const endEvent = captured.find((e) => e.type === 'tool_end');
+
+    expect(startEvent?.kind).toBe('VIZ');
+    expect(endEvent?.kind).toBe('VIZ');
+    expect(endEvent?.label).toBe('create_view(Sales by Region)');
+    expect(endEvent?.resultSummary).toBe('→ view created');
+  });
+
   it('extracts JSON from code blocks in text response', async () => {
     const agent = new ViewAgent({
       provider: mockProvider([

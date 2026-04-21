@@ -1,4 +1,5 @@
 export { Agent, type AgentConfig, type AgentDataSource, type AgentEvent } from './agent';
+export { classifyTool, formatStart, formatEnd, type ToolKind } from './events/tool-event-formatter';
 export {
   QueryAgent,
   ViewAgent,

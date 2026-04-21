@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* PASTE tokens.css :root block verbatim here. */
+  body { margin:0; background:var(--bg-0); color:var(--ink-1); font-family:var(--font-body); padding:32px 40px; }
+  .fig { max-width:880px; margin:0 auto; }
+  .fig__eyebrow { font-family:var(--font-mono); font-size:var(--text-eyebrow); letter-spacing:var(--track-eyebrow); text-transform:uppercase; color:var(--ink-4); margin-bottom:6px; }
+  .fig__title { font-family:var(--font-display); font-size:var(--text-chart-h); font-weight:600; letter-spacing:var(--track-tight); margin:0; line-height:1.2; }
+  .fig__sub { font-family:var(--font-body); font-size:12.5px; color:var(--ink-3); margin:6px 0 22px; }
+  svg { width:100%; height:260px; display:block; }
+  .axis text { font-family:var(--font-mono); font-size:var(--text-micro); fill:var(--ink-5); letter-spacing:var(--track-label); text-transform:uppercase; }
+  .line { fill:none; stroke:var(--accent-warm); stroke-width:1.5; stroke-dasharray:2000; stroke-dashoffset:2000; transition:stroke-dashoffset var(--dur-chart) var(--ease-draw); }
+  .area { fill:var(--accent-warm); fill-opacity:0; transition:fill-opacity var(--dur-chart) var(--ease-draw); }
+  .line.in, .area.in { stroke-dashoffset:0; }
+  .area.in { fill-opacity:0.2; }
+  .peak { fill:var(--accent); stroke:var(--bg-0); stroke-width:2; }
+  .peak-label { font-family:var(--font-mono); font-variant-numeric:tabular-nums; font-size:var(--text-small); fill:var(--accent); font-weight:600; }
+  .baseline { stroke:var(--ink-5); stroke-dasharray:2 4; stroke-width:1; }
+  .fig__foot { display:flex; justify-content:space-between; font-family:var(--font-mono); font-size:var(--text-micro); letter-spacing:var(--track-label); text-transform:uppercase; color:var(--ink-5); margin-top:20px; padding-top:12px; border-top:1px solid var(--line-2); }
+</style>
+</head>
+<body>
+<div class="fig">
+  <div class="fig__eyebrow">FIGURE 01 · <!-- CATEGORY --></div>
+  <h1 class="fig__title"><!-- FINDING HEADLINE --></h1>
+  <p class="fig__sub"><!-- QUALIFICATION --></p>
+  <svg id="svg" viewBox="0 0 800 260" preserveAspectRatio="none"></svg>
+  <div class="fig__foot">
+    <span>SOURCE · <!-- SOURCE --> · <!-- PERIOD --></span>
+    <span>N = <!-- ROWCOUNT --> · UPDATED <!-- DATE --></span>
+  </div>
+</div>
+<script>
+  // DATA: [{ x: '2024-01', y: 42.1 }, ...] — x is the period label, y the metric value.
+  const DATA = [/* <!-- DATA JSON --> */];
+  const W = 800, H = 260, PAD = 24;
+  const xs = DATA.map(function (_, i) { return i; });
+  const ys = DATA.map(function (d) { return d.y; });
+  const minY = Math.min.apply(null, ys), maxY = Math.max.apply(null, ys);
+  const sx = function (i) { return PAD + (i / Math.max(1, xs.length - 1)) * (W - PAD * 2); };
+  const sy = function (v) { return H - PAD - ((v - minY) / Math.max(1e-9, maxY - minY)) * (H - PAD * 2); };
+  const path = DATA.map(function (d, i) { return (i === 0 ? 'M' : 'L') + sx(i).toFixed(1) + ',' + sy(d.y).toFixed(1); }).join(' ');
+  const area = 'M' + PAD + ',' + (H - PAD) + ' ' + DATA.map(function (d, i) { return 'L' + sx(i).toFixed(1) + ',' + sy(d.y).toFixed(1); }).join(' ') + ' L' + sx(DATA.length - 1).toFixed(1) + ',' + (H - PAD) + ' Z';
+  const peakIdx = ys.indexOf(maxY);
+  const svg = document.getElementById('svg');
+  svg.innerHTML =
+    '<line class="baseline" x1="' + PAD + '" x2="' + (W - PAD) + '" y1="' + (H - PAD) + '" y2="' + (H - PAD) + '"></line>' +
+    '<path class="area" d="' + area + '"></path>' +
+    '<path class="line" d="' + path + '"></path>' +
+    '<circle class="peak" cx="' + sx(peakIdx).toFixed(1) + '" cy="' + sy(maxY).toFixed(1) + '" r="4"></circle>' +
+    '<text class="peak-label" x="' + (sx(peakIdx) + 8).toFixed(1) + '" y="' + (sy(maxY) - 6).toFixed(1) + '">+' + maxY.toFixed(2) + '</text>' +
+    '<g class="axis">' +
+    '<text x="' + PAD + '" y="' + (H - 4) + '">' + (DATA[0] ? DATA[0].x : '') + '</text>' +
+    '<text x="' + (W - PAD) + '" y="' + (H - 4) + '" text-anchor="end">' + (DATA[DATA.length - 1] ? DATA[DATA.length - 1].x : '') + '</text>' +
+    '</g>';
+  (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(function () {
+    requestAnimationFrame(function () {
+      svg.querySelector('.line').classList.add('in');
+      svg.querySelector('.area').classList.add('in');
+    });
+  });
+</script>
+</body>
+</html>

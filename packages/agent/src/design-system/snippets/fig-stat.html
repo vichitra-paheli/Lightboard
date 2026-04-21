@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* PASTE tokens.css :root block verbatim here. */
+  body { margin:0; background:var(--bg-0); color:var(--ink-1); font-family:var(--font-body); padding:32px 40px; }
+  .fig { max-width:520px; margin:0 auto; }
+  .fig__eyebrow { font-family:var(--font-mono); font-size:var(--text-eyebrow); letter-spacing:var(--track-eyebrow); text-transform:uppercase; color:var(--ink-4); margin-bottom:6px; }
+  .fig__title { font-family:var(--font-display); font-size:var(--text-chart-h); font-weight:600; letter-spacing:var(--track-tight); margin:0; line-height:1.2; }
+  .fig__sub { font-family:var(--font-body); font-size:12.5px; color:var(--ink-3); margin:6px 0 28px; }
+  .stat { display:grid; grid-template-columns:1fr auto; gap:20px; align-items:baseline; padding: 20px 0 24px; border-top: 1px solid var(--line-2); border-bottom: 1px solid var(--line-2); }
+  .stat__value { font-family:var(--font-display); font-variant-numeric:tabular-nums; font-size: 56px; font-weight: 600; letter-spacing:var(--track-tight); color:var(--ink-1); line-height:1; }
+  .stat__delta { font-family:var(--font-mono); font-variant-numeric:tabular-nums; font-size: var(--text-body); color:var(--accent); font-weight:600; white-space:nowrap; }
+  .stat__delta.is-negative { color:var(--ink-3); }
+  .stat__label { font-family:var(--font-mono); font-size:var(--text-micro); letter-spacing:var(--track-label); text-transform:uppercase; color:var(--ink-4); margin-top: 6px; }
+  .fig__foot { display:flex; justify-content:space-between; font-family:var(--font-mono); font-size:var(--text-micro); letter-spacing:var(--track-label); text-transform:uppercase; color:var(--ink-5); margin-top:18px; padding-top:12px; }
+</style>
+</head>
+<body>
+<div class="fig">
+  <div class="fig__eyebrow">FIGURE 01 · <!-- CATEGORY --></div>
+  <h1 class="fig__title"><!-- FINDING HEADLINE --></h1>
+  <p class="fig__sub"><!-- QUALIFICATION --></p>
+  <div class="stat">
+    <div>
+      <div class="stat__value" id="val"><!-- BIG NUMBER --></div>
+      <div class="stat__label"><!-- UNIT / LABEL --></div>
+    </div>
+    <div class="stat__delta" id="delta"><!-- +11.59 --></div>
+  </div>
+  <div class="fig__foot">
+    <span>SOURCE · <!-- SOURCE --> · <!-- PERIOD --></span>
+    <span>N = <!-- ROWCOUNT --> · UPDATED <!-- DATE --></span>
+  </div>
+</div>
+<script>
+  // Hardcode the primary number and optional signed delta.
+  const DATA = { value: 0 /* <!-- BIG NUMBER --> */, delta: 0 /* optional signed delta, null to hide */ };
+  function fmt(v) { return (Math.abs(v) >= 1000 ? v.toLocaleString('en-US', { maximumFractionDigits: 0 }) : v.toFixed(2)); }
+  function signed(v) { return (v > 0 ? '+' : '') + fmt(v); }
+  document.getElementById('val').textContent = fmt(DATA.value);
+  var deltaEl = document.getElementById('delta');
+  if (DATA.delta == null) {
+    deltaEl.style.display = 'none';
+  } else {
+    deltaEl.textContent = signed(DATA.delta);
+    if (DATA.delta < 0) deltaEl.classList.add('is-negative');
+  }
+</script>
+</body>
+</html>

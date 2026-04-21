@@ -1,4 +1,5 @@
 import { ConversationManager } from './conversation/manager';
+import { classifyTool, formatEnd, formatStart, type ToolKind } from './events/tool-event-formatter';
 import type { LLMProvider, Message, StreamEvent, ToolCallResult } from './provider/types';
 import { buildSystemPrompt } from './prompt/system';
 import { agentTools } from './tools/definitions';
@@ -7,8 +8,30 @@ import { ToolRouter, type ToolContext } from './tools/router';
 /** Events emitted by the agent during a conversation turn. */
 export type AgentEvent =
   | { type: 'text'; text: string }
-  | { type: 'tool_start'; name: string; id: string }
-  | { type: 'tool_end'; name: string; result: string; isError: boolean }
+  | {
+      type: 'tool_start';
+      name: string;
+      id: string;
+      /** Semantic bucket used by the UI to color-code the row. */
+      kind?: ToolKind;
+      /** Compact single-line label for the editorial trace. */
+      label?: string;
+      /** When a sub-agent ran this tool, the role of that sub-agent. */
+      parentAgent?: string;
+    }
+  | {
+      type: 'tool_end';
+      name: string;
+      result: string;
+      isError: boolean;
+      kind?: ToolKind;
+      label?: string;
+      /** Terminal suffix like `→ 412 rows`. */
+      resultSummary?: string;
+      /** Wall-clock execution duration, measured around the tool router call. */
+      durationMs?: number;
+      parentAgent?: string;
+    }
   | { type: 'agent_start'; agent: string; task: string }
   | { type: 'agent_end'; agent: string; summary: string }
   | { type: 'thinking'; text: string }
@@ -112,9 +135,18 @@ export class Agent {
           case 'tool_call_start':
             hasToolCalls = true;
             toolInputBuffers.set(event.id, '');
-            yield { type: 'tool_start', name: event.name, id: event.id };
-            // Store the tool name for later
+            // Store the tool name for later so we can enrich tool_start once
+            // the input has finished streaming.
             toolCalls.push({ id: event.id, name: event.name, input: {} });
+            // Emit the start event now (with kind only — label comes once
+            // the input is complete at tool_end boundary). A minimally-enriched
+            // start lets the UI still color the row while args are streaming.
+            yield {
+              type: 'tool_start',
+              name: event.name,
+              id: event.id,
+              kind: classifyTool(event.name),
+            };
             break;
 
           case 'tool_call_delta':
@@ -161,14 +193,27 @@ export class Agent {
       const toolResults = [];
       let allFailed = true;
       for (const tc of toolCalls) {
+        const { kind, label } = formatStart(tc.name, tc.input);
+        const startMs = performance.now();
         const result = await this.toolRouter.execute(tc.name, tc.input);
+        const durationMs = Math.max(0, Math.round(performance.now() - startMs));
+        const { resultSummary } = formatEnd(tc.name, result.content, result.isError, durationMs);
         toolResults.push({
           toolCallId: tc.id,
           content: result.content,
           isError: result.isError,
         });
         if (!result.isError) allFailed = false;
-        yield { type: 'tool_end', name: tc.name, result: result.content, isError: result.isError };
+        yield {
+          type: 'tool_end',
+          name: tc.name,
+          result: result.content,
+          isError: result.isError,
+          kind,
+          label,
+          durationMs,
+          ...(resultSummary !== undefined ? { resultSummary } : {}),
+        };
       }
 
       // Circuit breaker: stop if tools keep failing
