@@ -90,7 +90,8 @@ export function buildViewPrompt(context: ViewPromptContext = {}): string {
   parts.push(
     '## Self-check before emitting\n\n' +
       'Walk this checklist. If any item fails, revise the HTML before calling `create_view` / `modify_view`.\n\n' +
-      DESIGN_RUBRIC.trim(),
+      DESIGN_RUBRIC.trim() +
+      '\n- [ ] DATA rows match the sampleRows / scratchpad rows provided in context — NEVER invented.',
   );
 
   // Optional data summary + current view payload.
@@ -164,6 +165,7 @@ const DATA_CONTRACT = `## Data contract
 
 const DONT_LIST = `## Don't
 
+- **NEVER fabricate data.** The \`const DATA = [...]\` array must be copied verbatim from the \`sampleRows\` shown in your Data summary (or from the scratchpad rows the leader passed you). If your context has no data rows — empty \`sampleRows\`, \`rowCount === 0\`, or no Data summary at all — do NOT invent plausible-looking values and do NOT call \`create_view\`. Instead, respond with a plain-text error explaining you need real data. Fabricated chart data is the worst failure mode: the chart and the leader's narration diverge, and users cannot trust the output.
 - No emoji. Not in titles, not in metadata, not in buttons.
 - No \`system-ui\` font fallbacks in generated CSS. Always use \`var(--font-display)\`, \`var(--font-body)\`, \`var(--font-mono)\`.
 - No hex values outside the magnitude ramp.

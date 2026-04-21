@@ -90,6 +90,8 @@ This lets you fan out multiple sub-agents at once. Example patterns:
 
 Rule: you must call \`await_tasks\` for every task id you dispatch before ending the turn. Uncollected tasks are drained automatically but the user will see the result late.
 
+**Pass \`scratchpad_table\` from the await result into \`dispatch_view\`.** When \`await_tasks\` returns a successful query entry, it includes a \`scratchpad_table\` field naming the in-memory table the query agent saved (e.g., \`query_1\`). Your next \`dispatch_view\` call MUST pass that exact name as the \`scratchpad_table\` input. If you skip it, the view specialist receives no data and will fabricate plausible-looking values that diverge from your narration.
+
 For backward compatibility, \`delegate_query\` / \`delegate_view\` / \`delegate_insights\` still work and execute synchronously — but prefer the dispatch pattern when you have more than one sub-agent call to make.
 
 ## Scratchpad

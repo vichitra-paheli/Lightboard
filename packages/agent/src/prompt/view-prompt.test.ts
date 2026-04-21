@@ -89,6 +89,17 @@ describe('buildViewPrompt', () => {
     expect(prompt).toContain('rowCount');
   });
 
+  it('includes the never-fabricate-data directive across all hints (issue #108)', () => {
+    for (const hint of ['horizontal-bar', 'line', 'donut', 'stat', 'auto', 'vertical-bar'] as const) {
+      const prompt = buildViewPrompt({ chartHint: hint });
+      expect(prompt, `hint=${hint}`).toMatch(/NEVER fabricate data/);
+      // The rubric checklist line must also be present.
+      expect(prompt, `hint=${hint}`).toMatch(
+        /DATA rows match the sampleRows \/ scratchpad rows provided in context/,
+      );
+    }
+  });
+
   it('keeps the total length within a sane budget', () => {
     // Tokens (~2.8k), voice (~0.7k), rubric (~0.3k), one snippet (~6k), plus
     // the prose wrapper brings horizontal-bar in around 17k chars. Two-snippet
