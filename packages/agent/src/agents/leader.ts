@@ -596,6 +596,13 @@ export class LeaderAgent {
         if (result.role === 'query') {
           // Query results: compact summary for the LLM, scratchpad table in side channel.
           entry.data_summary = buildDataSummary(result.data);
+          // Surface the scratchpad table name so the leader can pass it to a
+          // follow-up `dispatch_view`. The sync delegate_query path already
+          // does this via its inline JSON blob; the async path was dropping
+          // it, so the view agent received no data and fabricated values.
+          if (result.scratchpadTable) {
+            entry.scratchpad_table = result.scratchpadTable;
+          }
         } else {
           // View and insights: return raw data so callers can surface viewSpec / analysis.
           entry.data = result.data;
@@ -748,6 +755,14 @@ export class LeaderAgent {
         }
       }
 
+      // Stamp the scratchpad table name onto the result itself so the async
+      // dispatch/await path can surface it to the leader's LLM. Without this
+      // the model never learns the table name and can't pass it to a follow-
+      // up dispatch_view, which causes the view agent to hallucinate data.
+      if (tableName) {
+        agentResult.scratchpadTable = tableName;
+      }
+
       return { result: agentResult, scratchpadTable: tableName };
     }
 
@@ -769,6 +784,29 @@ export class LeaderAgent {
           const rows = await scratchpad.loadTable(input.scratchpad_table as string);
           dataSummary = buildDataSummary({ rows });
         } catch { /* fallback to empty summary */ }
+      }
+
+      // Failsafe: if the leader forgot to pass `scratchpad_table` AND there is
+      // no inline data_summary, fall back to the most recent scratchpad table
+      // for this conversation. Without this the view agent runs with an empty
+      // context and fabricates plausible-looking values (issue #108). The
+      // `listTables()` order is append-only — last entry is the most recent
+      // query_N for this session.
+      if (!dataSummary) {
+        try {
+          const scratchpad = this.scratchpadManager.getOrCreate(conversationId);
+          const tables = scratchpad.listTables();
+          if (tables.length > 0) {
+            const mostRecent = tables[tables.length - 1]!;
+            const rows = await scratchpad.loadTable(mostRecent.name);
+            if (rows.length > 0) {
+              dataSummary = buildDataSummary({ rows });
+              onStatus?.(
+                `View agent: no explicit data passed; falling back to most recent scratchpad table "${mostRecent.name}" (${rows.length} rows).`,
+              );
+            }
+          }
+        } catch { /* fall through — the view prompt rubric tells the agent to refuse on empty context */ }
       }
 
       // chart_hint resolution order:

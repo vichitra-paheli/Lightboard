@@ -794,6 +794,199 @@ describe('LeaderAgent', () => {
     });
   });
 
+  describe('view-agent data grounding (issue #108)', () => {
+    it('await_tasks entry surfaces both data_summary and scratchpad_table for a successful query', async () => {
+      const scratchpadManager = new ScratchpadManager({ cleanupIntervalMs: 0 });
+      const ctx = mockToolContext();
+      (ctx.runSQL as ReturnType<typeof vi.fn>).mockResolvedValue({
+        rows: [
+          { name: 'Player A', tsr: 19.04 },
+          { name: 'Player B', tsr: 19.01 },
+          { name: 'Player C', tsr: 16.9 },
+        ],
+        rowCount: 3,
+      });
+
+      // Sequence: leader dispatches → query sub-agent runs run_sql → leader awaits.
+      const leader = new LeaderAgent({
+        provider: mockProvider([
+          // Leader round 1: dispatch_query
+          [
+            { type: 'tool_call_start', id: 'd1', name: 'dispatch_query' },
+            {
+              type: 'tool_call_end',
+              id: 'd1',
+              name: 'dispatch_query',
+              input: { instruction: 'Top batters by TSR', source_id: 'pg-main' },
+            },
+            { type: 'message_end', stopReason: 'tool_use' },
+          ],
+          // Query sub-agent round 1: run_sql
+          [
+            { type: 'tool_call_start', id: 'q1', name: 'run_sql' },
+            {
+              type: 'tool_call_end',
+              id: 'q1',
+              name: 'run_sql',
+              input: { source_id: 'pg-main', sql: 'SELECT name, tsr FROM ipl_batters' },
+            },
+            { type: 'message_end', stopReason: 'tool_use' },
+          ],
+          // Query sub-agent round 2: text-only close
+          [
+            { type: 'text_delta', text: 'Query complete.' },
+            { type: 'message_end', stopReason: 'end_turn' },
+          ],
+          // Leader round 2: await_tasks
+          [
+            { type: 'tool_call_start', id: 'a1', name: 'await_tasks' },
+            {
+              type: 'tool_call_end',
+              id: 'a1',
+              name: 'await_tasks',
+              input: { task_ids: ['task_query_1'] },
+            },
+            { type: 'message_end', stopReason: 'tool_use' },
+          ],
+          // Leader round 3: wrap up text
+          [
+            { type: 'text_delta', text: 'Done.' },
+            { type: 'message_end', stopReason: 'end_turn' },
+          ],
+        ]),
+        toolContext: ctx,
+        dataSources: [{ id: 'pg-main', name: 'Main DB', type: 'postgres' }],
+        scratchpadManager,
+      });
+
+      const events = await collectEvents(leader, 'Show me top batters by TSR');
+
+      const awaitEnd = events.find(
+        (e) => e.type === 'tool_end' && e.name === 'await_tasks',
+      ) as Extract<AgentEvent, { type: 'tool_end' }> | undefined;
+      expect(awaitEnd).toBeDefined();
+      expect(awaitEnd!.isError).toBe(false);
+
+      const parsed = JSON.parse(awaitEnd!.result) as Record<
+        string,
+        { success: boolean; data_summary?: Record<string, unknown>; scratchpad_table?: string }
+      >;
+      const [entry] = Object.values(parsed);
+      expect(entry).toBeDefined();
+      expect(entry!.success).toBe(true);
+      // Both fields must be present so the leader's LLM can wire up dispatch_view.
+      expect(entry!.data_summary).toBeDefined();
+      expect(entry!.scratchpad_table).toBe('query_1');
+
+      await scratchpadManager.destroyAll();
+    });
+
+    it('ViewAgent falls back to most recent scratchpad table when dispatch_view omits both data_summary and scratchpad_table', async () => {
+      const scratchpadManager = new ScratchpadManager({ cleanupIntervalMs: 0 });
+      // Pre-seed the conversation's scratchpad with a query_1 table so the
+      // fallback has something to load.
+      const pad = scratchpadManager.getOrCreate('test-conv');
+      await pad.saveTable(
+        'query_1',
+        [
+          { name: 'RM Patidar', tsr: 19.04 },
+          { name: 'Abhishek Sharma', tsr: 19.01 },
+        ],
+        'Top batters',
+      );
+
+      const fallbackMessages: string[] = [];
+
+      // Spy provider: captures the system prompt handed to the view sub-agent
+      // so we can assert it received the seeded data. First two calls belong
+      // to the leader (dispatch + await text wrap); the third is the view
+      // sub-agent's own LLM call.
+      let callIdx = 0;
+      const seenSystemPrompts: string[] = [];
+      const sequences: StreamEvent[][] = [
+        // Leader round 1: dispatch_view with ONLY instruction (no data_summary, no scratchpad_table).
+        [
+          { type: 'tool_call_start', id: 'dv1', name: 'dispatch_view' },
+          {
+            type: 'tool_call_end',
+            id: 'dv1',
+            name: 'dispatch_view',
+            input: { instruction: 'Plot the top batters' },
+          },
+          { type: 'message_end', stopReason: 'tool_use' },
+        ],
+        // View sub-agent round 1: text-only (we don't need to test create_view
+        // wiring here — only that the view agent received non-empty context).
+        [
+          { type: 'text_delta', text: 'Noted.' },
+          { type: 'message_end', stopReason: 'end_turn' },
+        ],
+        // Leader round 2: await_tasks then close.
+        [
+          { type: 'tool_call_start', id: 'at1', name: 'await_tasks' },
+          {
+            type: 'tool_call_end',
+            id: 'at1',
+            name: 'await_tasks',
+            input: { task_ids: ['task_view_1'] },
+          },
+          { type: 'message_end', stopReason: 'tool_use' },
+        ],
+        // Leader round 3: final text.
+        [
+          { type: 'text_delta', text: 'Done.' },
+          { type: 'message_end', stopReason: 'end_turn' },
+        ],
+      ];
+      const provider: LLMProvider = {
+        name: 'spy',
+        async *chat(_messages, _tools, options) {
+          seenSystemPrompts.push(options?.system ?? '');
+          const events = sequences[callIdx] ?? [
+            { type: 'message_end' as const, stopReason: 'end_turn' },
+          ];
+          callIdx++;
+          for (const ev of events) yield ev;
+        },
+      };
+
+      const leader = new LeaderAgent({
+        provider,
+        toolContext: mockToolContext(),
+        dataSources: [{ id: 'pg-main', name: 'Main DB', type: 'postgres' }],
+        scratchpadManager,
+      });
+
+      // Hook into status events so we can assert the fallback message fired.
+      const events: AgentEvent[] = [];
+      for await (const event of leader.chat('Plot those batters', 'test-conv')) {
+        events.push(event);
+        if (event.type === 'status' && event.scope === 'view') {
+          fallbackMessages.push(event.message);
+        } else if (event.type === 'task_progress') {
+          fallbackMessages.push(event.message);
+        }
+      }
+
+      // The view sub-agent's system prompt is the second LLM call
+      // (index 1) — between the leader's round 1 and round 2. It should
+      // include the seeded row data because the fallback loaded query_1.
+      // We search across all captured prompts because the exact index
+      // depends on internal scheduling.
+      const viewPrompt = seenSystemPrompts.find((p) => p.includes('Data summary'));
+      expect(viewPrompt).toBeDefined();
+      expect(viewPrompt).toContain('RM Patidar');
+
+      // The fallback status message should have surfaced.
+      const fallbackFired = fallbackMessages.some((m) =>
+        m.includes('falling back to most recent scratchpad table'),
+      );
+      expect(fallbackFired).toBe(true);
+
+      await scratchpadManager.destroyAll();
+    });
+  });
+
   describe('setPromptOverride', () => {
     it('forwards the override string to the provider in place of buildLeaderPrompt', async () => {
       // Spy provider that records the system prompt it was called with.

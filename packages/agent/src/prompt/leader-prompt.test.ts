@@ -37,6 +37,15 @@ describe('buildLeaderPrompt', () => {
     expect(prompt).toContain('query_1');
   });
 
+  it('instructs the leader to pass scratchpad_table from await results (issue #108)', () => {
+    const prompt = buildLeaderPrompt({ dataSources: [] });
+    expect(prompt).toMatch(/scratchpad_table/);
+    // Must mention the await result as the source of the table name.
+    expect(prompt).toMatch(/await_tasks/);
+    // Must name dispatch_view as the next call that consumes it.
+    expect(prompt).toMatch(/dispatch_view/);
+  });
+
   it('stays under a sane token budget with the voice card', () => {
     // Original leader prompt sat at ~5.2k chars (~1.3k tokens). The voice
     // card adds ~1k chars on top. 6k is the realistic ceiling without
