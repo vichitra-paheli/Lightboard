@@ -793,4 +793,40 @@ describe('LeaderAgent', () => {
       expect(retryText).toBeDefined();
     });
   });
+
+  describe('setPromptOverride', () => {
+    it('forwards the override string to the provider in place of buildLeaderPrompt', async () => {
+      // Spy provider that records the system prompt it was called with.
+      const seenSystem: string[] = [];
+      const provider: LLMProvider = {
+        name: 'spy',
+        async *chat(_messages, _tools, options) {
+          seenSystem.push(options?.system ?? '');
+          yield { type: 'text_delta', text: 'ok' };
+          yield { type: 'message_end', stopReason: 'end_turn' };
+        },
+      };
+
+      const leader = new LeaderAgent({
+        provider,
+        toolContext: mockToolContext(),
+        dataSources: [{ id: 'pg-main', name: 'Main DB', type: 'postgres' }],
+      });
+
+      const override = 'OVERRIDE_PROMPT_FOR_EVAL_HARNESS';
+      leader.setPromptOverride(override);
+      await collectEvents(leader, 'hi');
+      expect(seenSystem).toHaveLength(1);
+      expect(seenSystem[0]).toBe(override);
+
+      // Reverting to null restores the default builder output.
+      leader.setPromptOverride(null);
+      await collectEvents(leader, 'hi again');
+      expect(seenSystem).toHaveLength(2);
+      expect(seenSystem[1]).not.toBe(override);
+      // buildLeaderPrompt starts with a well-known role sentence; sanity-check
+      // that we got the real prompt back.
+      expect(seenSystem[1]).toContain("Lightboard's data exploration assistant");
+    });
+  });
 });

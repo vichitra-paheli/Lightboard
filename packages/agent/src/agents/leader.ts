@@ -147,6 +147,14 @@ export class LeaderAgent {
    * forced to end cleanly. Reset at the start of every `chat()` call.
    */
   private narrateCalled = false;
+  /**
+   * Optional override for the leader system prompt. When set, the override is
+   * passed to the provider verbatim instead of the output of
+   * {@link buildLeaderPrompt}. Intended for the eval harness (Phase 4) — it
+   * lets experimental prompt variants be swapped in at runtime without
+   * touching the cache key. Not part of the production code path.
+   */
+  private promptOverride: string | null = null;
 
   constructor(config: LeaderAgentConfig) {
     if (!config.providers && !config.provider) {
@@ -187,6 +195,16 @@ export class LeaderAgent {
   }
 
   /**
+   * Swap the leader's system prompt with an override string. Passes the
+   * provided text to the LLM verbatim in place of {@link buildLeaderPrompt}'s
+   * output. Meant for the eval harness that A/B tests prompt variants —
+   * do NOT use in production. Pass `null` to restore the default behaviour.
+   */
+  setPromptOverride(prompt: string | null): void {
+    this.promptOverride = prompt;
+  }
+
+  /**
    * Process a user message and stream the leader's response.
    * Delegates to sub-agents as needed, emitting agent_start/agent_end events.
    */
@@ -207,7 +225,7 @@ export class LeaderAgent {
       `${t.name} (${t.rowCount} rows): ${t.description}`,
     );
 
-    const systemPrompt = buildLeaderPrompt({
+    const systemPrompt = this.promptOverride ?? buildLeaderPrompt({
       dataSources: this.dataSources,
       scratchpadTables,
     });
