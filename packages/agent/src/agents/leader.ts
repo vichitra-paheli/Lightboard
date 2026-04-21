@@ -139,6 +139,14 @@ export class LeaderAgent {
   private taskPool: TaskPool = new TaskPool();
   /** Events emitted by background tasks, flushed at safe yield points. */
   private pendingEvents: AgentEvent[] = [];
+  /**
+   * Whether `narrate_summary` has already been called successfully this turn.
+   * Set by the tool-dispatch branch; consumed by the outer loop to short-
+   * circuit the next LLM turn with `stopReason: 'end_turn'` so models that
+   * would otherwise keep emitting text / tool-calls after narrating are
+   * forced to end cleanly. Reset at the start of every `chat()` call.
+   */
+  private narrateCalled = false;
 
   constructor(config: LeaderAgentConfig) {
     if (!config.providers && !config.provider) {
@@ -192,6 +200,7 @@ export class LeaderAgent {
     // Fresh task pool per user turn — tasks should not survive across turns.
     this.taskPool = new TaskPool();
     this.pendingEvents = [];
+    this.narrateCalled = false;
 
     const scratchpad = this.scratchpadManager.getOrCreate(conversationId);
     const scratchpadTables = scratchpad.listTables().map((t) =>
@@ -301,6 +310,11 @@ export class LeaderAgent {
           result = { content: JSON.stringify(tables), isError: false };
         } else if (tc.name === 'load_scratchpad') {
           result = await this.handleLoadScratchpad(tc, conversationId);
+        } else if (tc.name === 'narrate_summary') {
+          result = this.handleNarrateSummary(tc);
+          if (!result.isError) {
+            this.narrateCalled = true;
+          }
         } else {
           result = { content: `Unknown tool: ${tc.name}`, isError: true };
         }
@@ -343,6 +357,16 @@ export class LeaderAgent {
         content: '',
         toolResults,
       });
+
+      // narrate_summary is the leader's terminal tool. If it ran successfully
+      // this round we short-circuit — no more LLM turns, no trailing
+      // chatter. Any model that would have kept calling tools after
+      // narrating is forced to end cleanly with `end_turn`.
+      if (this.narrateCalled) {
+        yield* this.drainOutstanding();
+        yield { type: 'done', stopReason: 'end_turn' };
+        return;
+      }
     }
 
     yield* this.drainOutstanding();
@@ -657,6 +681,102 @@ export class LeaderAgent {
     };
 
     return { result: await agent.run(task) };
+  }
+
+  /**
+   * Validate and echo a `narrate_summary` tool call. Returns a structured
+   * JSON payload the SSE route re-emits as a `narrate_ready` event for the
+   * UI. Validation is deliberately defensive — local Qwen builds drop
+   * minItems / maxItems constraints sometimes, so we check shape here even
+   * though the JSON Schema already declares it.
+   */
+  private handleNarrateSummary(
+    tc: ToolCallResult,
+  ): { content: string; isError: boolean } {
+    const input = (tc.input ?? {}) as Record<string, unknown>;
+    const rawBullets = input.bullets;
+    if (!Array.isArray(rawBullets)) {
+      return {
+        content: 'narrate_summary: `bullets` is required and must be an array of 3 objects.',
+        isError: true,
+      };
+    }
+    if (rawBullets.length !== 3) {
+      return {
+        content: `narrate_summary: expected exactly 3 bullets, received ${rawBullets.length}.`,
+        isError: true,
+      };
+    }
+
+    const seenRanks = new Set<number>();
+    const cleaned: Array<{
+      rank: 1 | 2 | 3;
+      headline: string;
+      value?: string;
+      body: string;
+    }> = [];
+    for (let i = 0; i < rawBullets.length; i++) {
+      const b = rawBullets[i];
+      if (!b || typeof b !== 'object') {
+        return {
+          content: `narrate_summary: bullet ${i} is not an object.`,
+          isError: true,
+        };
+      }
+      const obj = b as Record<string, unknown>;
+      const rank = obj.rank;
+      if (rank !== 1 && rank !== 2 && rank !== 3) {
+        return {
+          content: `narrate_summary: bullet ${i} has invalid rank "${String(rank)}" (must be 1, 2, or 3).`,
+          isError: true,
+        };
+      }
+      if (seenRanks.has(rank)) {
+        return {
+          content: `narrate_summary: duplicate rank ${rank} — each of 1, 2, 3 must appear exactly once.`,
+          isError: true,
+        };
+      }
+      seenRanks.add(rank);
+
+      const headline = typeof obj.headline === 'string' ? obj.headline.trim() : '';
+      if (!headline) {
+        return {
+          content: `narrate_summary: bullet ${i} (rank ${rank}) has empty or missing headline.`,
+          isError: true,
+        };
+      }
+
+      const body = typeof obj.body === 'string' ? obj.body.trim() : '';
+      if (!body) {
+        return {
+          content: `narrate_summary: bullet ${i} (rank ${rank}) has empty or missing body.`,
+          isError: true,
+        };
+      }
+
+      const value = typeof obj.value === 'string' ? obj.value.trim() : undefined;
+      cleaned.push({
+        rank,
+        headline,
+        body,
+        ...(value ? { value } : {}),
+      });
+    }
+
+    // Sort by rank so downstream consumers don't have to re-order.
+    cleaned.sort((a, b) => a.rank - b.rank);
+
+    const caveat = typeof input.caveat === 'string' ? input.caveat.trim() : '';
+
+    return {
+      content: JSON.stringify({
+        bullets: cleaned,
+        ...(caveat ? { caveat } : {}),
+        rendered: true,
+      }),
+      isError: false,
+    };
   }
 
   /** Handle load_scratchpad — returns summary, not full data. */

@@ -1,4 +1,5 @@
 import type { ToolDefinition } from '../provider/types';
+import { narrateTools } from './narrate-tools';
 
 /**
  * Tool definitions available to the Leader Agent.
@@ -11,6 +12,9 @@ import type { ToolDefinition } from '../provider/types';
  *
  * Data stays server-side: query tasks auto-save results to the scratchpad.
  * The LLM only sees compact summaries (columns, row count, sample rows).
+ *
+ * The leader's tool list ends with `narrate_summary` — the terminal
+ * finalization tool. See {@link narrateTools} for the full contract.
  */
 export const leaderTools: ToolDefinition[] = [
   {
@@ -232,4 +236,5 @@ export const leaderTools: ToolDefinition[] = [
       required: ['table_name'],
     },
   },
+  ...narrateTools,
 ];
