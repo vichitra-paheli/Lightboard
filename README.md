@@ -51,9 +51,14 @@ Every chart you generate in a session stays one click away in the filmstrip — 
 
 - **AI-native by design.** A multi-agent system — a leader plus query, view, and insights specialists — writes the SQL, designs the chart, and narrates the finding. It is not a chatbot bolted onto a dashboard.
 - **Bring your own model.** Works with Anthropic Claude or any OpenAI-compatible endpoint — cloud or local. Actively tuned against Claude Sonnet 4.6 and local Qwen 3.6 35b, so it runs equally well on the frontier or on a single workstation.
-- **Opinionated visuals.** The agent emits a complete, sandboxed HTML document per view. No chart-config UI, no color-picker rabbit holes — the output *is* the config.
-- **Deploy anywhere.** The same codebase runs as cloud SaaS, single-node Docker, or a fully airgapped Kubernetes install with a local LLM. No telemetry, no mandatory calls home.
-- **Pure TypeScript monorepo.** No AGPL, no Go, no JVM. One `pnpm install` and you are running.
+- **Opinionated visuals.** Every answer is typeset like a magazine figure — editorial headline, brand-aligned color ramp, narration below. No chart-config UI, no color-picker rabbit holes; the output *is* the config.
+- **Pure TypeScript monorepo.** One `pnpm install` and you are running.
+
+## Planned features
+
+- **Reusable visualizations.** Save any generated view and pull it — or a remix of it — into a later conversation without starting from a blank prompt.
+- **Post-visualization data filtering.** Slice, bucket, and drill into a chart's underlying rows without round-tripping another prompt.
+- **Composable dashboards.** Arrange saved views into a dashboard whose data refreshes automatically as the underlying source evolves.
 
 ## Quick start
 
@@ -100,20 +105,18 @@ After running the seed script:
 
 ## Architecture
 
-Lightboard is a TypeScript monorepo built with Turborepo and pnpm workspaces. The web app is a Next.js 15 app-router application that talks to a multi-agent orchestration layer: a **leader** routes each question to one of three specialists — **query** (schema introspection and raw SQL), **view** (generates a complete self-contained HTML document rendered in a sandboxed iframe), or **insights** (stats and narration via an in-memory DuckDB scratchpad). Data sources plug in through a connector SDK; tenant isolation is enforced at the Postgres layer via row-level security.
+Lightboard is a TypeScript monorepo built with Turborepo and pnpm workspaces. The web app is a Next.js 15 app-router application that talks to a multi-agent orchestration layer: a **leader** routes each question to one of three specialists — **query** (schema introspection and raw SQL), **view** (designs the chart and its editorial framing), or **insights** (stats and narration over an in-memory session scratchpad). Data sources plug in through a connector SDK.
 
 ```
 lightboard/
-├── apps/web/              # Next.js 15 (app router) — main application
+├── apps/web/              # Next.js 15 app + Playwright E2E specs under e2e/
 ├── packages/
 │   ├── agent/             # Multi-agent orchestration (leader + specialists)
 │   ├── connector-sdk/     # Data source adapter interface (JSON rows)
 │   ├── connectors/        # Postgres connector
 │   ├── db/                # Drizzle schema, auth, migrations
-│   ├── telemetry/         # OpenTelemetry SDK + built-in data source
 │   └── ui/                # shadcn/ui component library
-├── docker/                # Docker Compose for local dev
-└── e2e/                   # Playwright E2E tests
+└── docker/                # Docker Compose for local dev
 ```
 
 ### Tech stack
@@ -123,11 +126,10 @@ lightboard/
 | Framework | Next.js 15 (app router, Turbopack) |
 | UI | shadcn/ui + Tailwind CSS v4 (dark-only, design-system tokens) |
 | Typography | Space Grotesk · Inter · JetBrains Mono |
-| Visualization | Agent-generated HTML in a sandboxed iframe |
 | State | Zustand (client), @tanstack/react-query (server) |
 | ORM | Drizzle ORM + PostgreSQL |
+| Cache | Redis (ioredis) |
 | Auth | Session-based (Argon2 + oslo) |
-| i18n | next-intl |
 | Testing | Vitest + Playwright + Testing Library |
 
 ## Development
@@ -153,23 +155,9 @@ pnpm --filter @lightboard/db db:seed         # Seed demo data
 pnpm --filter @lightboard/db db:studio       # Open Drizzle Studio
 ```
 
-## Multi-tenancy
-
-Every table has an `org_id` column. PostgreSQL Row Level Security (RLS) policies enforce tenant isolation at the database level. API middleware sets the `app.current_org_id` session variable on every request so route handlers never filter by org manually.
-
-## Deployment modes
-
-- **Cloud SaaS** — Next.js + managed Postgres + Redis + Claude API.
-- **On-prem Docker** — Single `docker compose up` with bundled Postgres and Redis.
-- **Airgapped Kubernetes** — Local LLM (Ollama / vLLM), plugins loaded from `/plugins` as `.tar.gz`, zero network egress.
-
 ## Contributing
 
 1. Create a feature branch from `main` (`feat/`, `fix/`, `refactor/`).
 2. Follow the code standards in `CLAUDE.md`.
 3. Ensure CI passes (lint, typecheck, unit tests, E2E tests).
 4. Open a PR — squash merge into `main`.
-
-## License
-
-Proprietary. All rights reserved.
