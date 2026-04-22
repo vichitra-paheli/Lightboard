@@ -250,6 +250,24 @@
   animation: fade-in 200ms ease-out;
 }
 
+/*
+ * Scoped thread-content fade for Explore conversation switching. Same
+ * timings as the root fade above so the two surfaces feel unified, but
+ * scoped to the centered thread column so the sidebar (where the click
+ * originated) stays steady underneath.
+ *
+ * Triggered manually via document.startViewTransition() in
+ * `explore-page-client.tsx` — the URL only updates `?c=<id>` via
+ * router.replace(), so the framework's automatic fade doesn't fire.
+ */
+::view-transition-old(thread-content) {
+  animation: fade-out 150ms ease-in both;
+}
+
+::view-transition-new(thread-content) {
+  animation: fade-in 200ms ease-out 150ms both;
+}
+
 @keyframes fade-out {
   from {
     opacity: 1;

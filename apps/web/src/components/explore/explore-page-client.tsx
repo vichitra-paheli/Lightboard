@@ -49,6 +49,36 @@ import { Thread } from './thread';
 import { parseSSE } from '@/lib/sse-parser';
 
 /**
+ * Run `fn` inside a `document.startViewTransition` when the View Transitions
+ * API is available, otherwise just call it. Used to wrap the wholesale
+ * thread-message swaps that happen on conversation load / new chat / initial
+ * `?c=<id>` mount-load — the only state changes that warrant a cross-fade.
+ *
+ * The Explore route names its centered content column `thread-content`
+ * (see thread.tsx) so this transition only fades that subtree, leaving the
+ * sidebar (where the click usually originates) steady underneath.
+ *
+ * Browsers without the API (Firefox <128, older Safari) fall through to a
+ * plain synchronous swap — graceful degradation, not a feature gate.
+ */
+function runWithViewTransition(fn: () => void): void {
+  if (
+    typeof document !== 'undefined' &&
+    'startViewTransition' in document &&
+    typeof (document as Document & { startViewTransition?: unknown })
+      .startViewTransition === 'function'
+  ) {
+    (
+      document as Document & {
+        startViewTransition: (cb: () => void) => unknown;
+      }
+    ).startViewTransition(fn);
+    return;
+  }
+  fn();
+}
+
+/**
  * Client-side Explore page. Centered-thread model: sidebar slot hosts the DB
  * picker + conversations list + new-chat button, the main area is a stacked
  * Thread + Composer. Charts render inline in the thread inside each turn's
@@ -772,17 +802,24 @@ export function ExplorePageClient() {
           messages?: PersistedMessage[];
         };
         if (!body.conversation || !body.messages) return;
-        setConversationId(id);
-        setMessages(persistedToUi(body.messages));
-        setActiveViewIndex(-1);
-        // Snap the picker back to the conversation's source so the next
-        // turn inherits the same connection. If the source has been
-        // deleted (dataSourceId === null) we leave the current selection
-        // alone — the user can pick something else.
         const targetSource = body.conversation.dataSourceId;
-        if (targetSource && targetSource !== selectedSource) {
-          setSelectedSource(targetSource);
-        }
+        // Batch the wholesale swap inside a view transition so the
+        // thread-content fades old → new instead of popping. The sidebar is
+        // outside the named transition root so it stays steady under the
+        // user's pointer. Falls back to a plain sync swap on browsers
+        // without the API.
+        runWithViewTransition(() => {
+          setConversationId(id);
+          setMessages(persistedToUi(body.messages!));
+          setActiveViewIndex(-1);
+          // Snap the picker back to the conversation's source so the next
+          // turn inherits the same connection. If the source has been
+          // deleted (dataSourceId === null) we leave the current selection
+          // alone — the user can pick something else.
+          if (targetSource && targetSource !== selectedSource) {
+            setSelectedSource(targetSource);
+          }
+        });
       } catch (err) {
         console.error(`[Explore] Error loading conversation ${id}:`, err);
       }
@@ -792,9 +829,14 @@ export function ExplorePageClient() {
 
   const handleNewConversation = useCallback(() => {
     handleStop();
-    setMessages([]);
-    setActiveViewIndex(-1);
-    setConversationId(null);
+    // Wrap the wholesale clear in a view transition so the thread fades
+    // out to its empty state instead of blanking — matches the
+    // load-conversation feel from the same entry-point family.
+    runWithViewTransition(() => {
+      setMessages([]);
+      setActiveViewIndex(-1);
+      setConversationId(null);
+    });
   }, [handleStop]);
 
   /**
