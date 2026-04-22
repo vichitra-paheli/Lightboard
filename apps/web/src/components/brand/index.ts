@@ -5,6 +5,10 @@
  * replace the text wordmark in the top bar, auth surfaces, and loading states.
  */
 export { LightboardSigil, type LightboardSigilProps } from './lightboard-sigil';
+export {
+  LightboardLogomark,
+  type LightboardLogomarkProps,
+} from './lightboard-logomark';
 export { SigilLoader, type SigilLoaderProps } from './sigil-loader';
 export {
   LightboardLoader,

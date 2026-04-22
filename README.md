@@ -1,40 +1,61 @@
-# Lightboard
+<p align="center">
+  <img src="./docs/brand/lightboard-logomark.svg" width="72" alt="Lightboard" />
+</p>
 
-AI-native data exploration and visualization platform. Connect databases, ask questions in natural language, get interactive charts, save them as views, compose dashboards, and share with access control.
+<h1 align="center">Lightboard</h1>
 
-## Architecture
+<p align="center"><strong>Ask your data anything. Get answers that explain themselves.</strong></p>
 
-Lightboard is a TypeScript monorepo built with Turborepo and pnpm workspaces.
+<p align="center">
+Lightboard turns a natural-language question into a branded, narrated visualization in seconds — and remembers the conversation so you can keep exploring. Connect a database, type a question, and a multi-agent system writes the SQL, designs the chart, and narrates what matters.
+</p>
 
-```
-lightboard/
-├── apps/web/              # Next.js 15 (app router) — main application
-├── packages/
-│   ├── agent/             # Multi-agent orchestration (leader + specialists)
-│   ├── connector-sdk/     # Data source adapter interface (JSON rows)
-│   ├── connectors/        # Postgres connector
-│   ├── db/                # Drizzle schema, auth, migrations
-│   ├── telemetry/         # OpenTelemetry SDK + built-in data source
-│   └── ui/                # shadcn/ui component library
-├── docker/                # Docker Compose for local dev
-└── e2e/                   # Playwright E2E tests
-```
+<p align="center">
+  <img src="./docs/screenshots/hero-explore.png" alt="Exploring an IPL cricket dataset in Lightboard — the sidebar lists saved conversations, the main panel renders a multi-coloured bar chart of top teams by total runs with a magazine-style headline and subtitle, and a filmstrip chip at the top right counts generated views." />
+</p>
 
-## Tech Stack
+## What it does
 
-| Layer | Technology |
-|-------|-----------|
-| Framework | Next.js 15 (app router, Turbopack) |
-| UI | shadcn/ui + Tailwind CSS v4 (dark-only, design-system tokens) |
-| Typography | Space Grotesk · Inter · JetBrains Mono |
-| Visualization | Agent-generated HTML in a sandboxed iframe |
-| State | Zustand (client), @tanstack/react-query (server) |
-| ORM | Drizzle ORM + PostgreSQL |
-| Auth | Session-based (Argon2 + oslo) |
-| i18n | next-intl |
-| Testing | Vitest + Playwright + Testing Library |
+Pick a data source, ask a question, and Lightboard answers with a full editorial moment: a headline, a chart typeset like a magazine figure, a short narration of the takeaways, and a handful of follow-ups to keep the thread moving. Everything you generate in a session is one click away in the filmstrip, and every conversation is saved so you can come back to it tomorrow.
 
-## Getting Started
+## Features
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<img src="./docs/screenshots/feature-exploration.png" alt="Natural-language exploration" /><br/>
+<strong>Natural-language exploration</strong><br/>
+Ask in English. Lightboard writes the SQL, runs it on your database, and renders an interactive chart — with follow-up chips queued up for your next question.
+</td>
+<td width="50%" valign="top">
+<img src="./docs/screenshots/feature-narration.png" alt="Narrated takeaways" /><br/>
+<strong>Narrated takeaways</strong><br/>
+Every answer ships with plain-English insights — what matters, what to notice, and a few follow-up chips so the next question writes itself.
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src="./docs/screenshots/feature-conversations.png" alt="Saved conversations" /><br/>
+<strong>Saved conversations</strong><br/>
+Pick up any thread from the sidebar. Schema context, follow-ups, and generated views all resume exactly where you left them.
+</td>
+<td width="50%" valign="top">
+<img src="./docs/screenshots/feature-filmstrip.png" alt="Filmstrip of branded views" /><br/>
+<strong>Filmstrip of branded views</strong><br/>
+Every chart you generate in a session stays one click away in the filmstrip — typeset in Space Grotesk, colored with an editorial warm-copper ramp, ready to pin.
+</td>
+</tr>
+</table>
+
+## Why Lightboard
+
+- **AI-native by design.** A multi-agent system — a leader plus query, view, and insights specialists — writes the SQL, designs the chart, and narrates the finding. It is not a chatbot bolted onto a dashboard.
+- **Bring your own model.** Works with Anthropic Claude or any OpenAI-compatible endpoint — cloud or local. Actively tuned against Claude Sonnet 4.6 and local Qwen 3.6 35b, so it runs equally well on the frontier or on a single workstation.
+- **Opinionated visuals.** The agent emits a complete, sandboxed HTML document per view. No chart-config UI, no color-picker rabbit holes — the output *is* the config.
+- **Deploy anywhere.** The same codebase runs as cloud SaaS, single-node Docker, or a fully airgapped Kubernetes install with a local LLM. No telemetry, no mandatory calls home.
+- **Pure TypeScript monorepo.** No AGPL, no Go, no JVM. One `pnpm install` and you are running.
+
+## Quick start
 
 ### Prerequisites
 
@@ -68,7 +89,7 @@ pnpm dev
 
 Open [http://localhost:3000](http://localhost:3000) to see the app.
 
-### Demo Credentials
+### Demo credentials
 
 After running the seed script:
 
@@ -76,6 +97,38 @@ After running the seed script:
 |------|-------|----------|
 | Admin | admin@lightboard.dev | lightboard123 |
 | Viewer | viewer@lightboard.dev | lightboard123 |
+
+## Architecture
+
+Lightboard is a TypeScript monorepo built with Turborepo and pnpm workspaces. The web app is a Next.js 15 app-router application that talks to a multi-agent orchestration layer: a **leader** routes each question to one of three specialists — **query** (schema introspection and raw SQL), **view** (generates a complete self-contained HTML document rendered in a sandboxed iframe), or **insights** (stats and narration via an in-memory DuckDB scratchpad). Data sources plug in through a connector SDK; tenant isolation is enforced at the Postgres layer via row-level security.
+
+```
+lightboard/
+├── apps/web/              # Next.js 15 (app router) — main application
+├── packages/
+│   ├── agent/             # Multi-agent orchestration (leader + specialists)
+│   ├── connector-sdk/     # Data source adapter interface (JSON rows)
+│   ├── connectors/        # Postgres connector
+│   ├── db/                # Drizzle schema, auth, migrations
+│   ├── telemetry/         # OpenTelemetry SDK + built-in data source
+│   └── ui/                # shadcn/ui component library
+├── docker/                # Docker Compose for local dev
+└── e2e/                   # Playwright E2E tests
+```
+
+### Tech stack
+
+| Layer | Technology |
+|-------|-----------|
+| Framework | Next.js 15 (app router, Turbopack) |
+| UI | shadcn/ui + Tailwind CSS v4 (dark-only, design-system tokens) |
+| Typography | Space Grotesk · Inter · JetBrains Mono |
+| Visualization | Agent-generated HTML in a sandboxed iframe |
+| State | Zustand (client), @tanstack/react-query (server) |
+| ORM | Drizzle ORM + PostgreSQL |
+| Auth | Session-based (Argon2 + oslo) |
+| i18n | next-intl |
+| Testing | Vitest + Playwright + Testing Library |
 
 ## Development
 
@@ -104,18 +157,18 @@ pnpm --filter @lightboard/db db:studio       # Open Drizzle Studio
 
 Every table has an `org_id` column. PostgreSQL Row Level Security (RLS) policies enforce tenant isolation at the database level. API middleware sets the `app.current_org_id` session variable on every request so route handlers never filter by org manually.
 
-## Deployment Modes
+## Deployment modes
 
-- **Cloud SaaS** — Next.js + managed Postgres + Redis + Claude API
-- **On-prem Docker** — Single `docker compose up` with bundled Postgres/Redis
-- **Airgapped K8s** — Local LLM (Ollama/vLLM), plugins loaded from `/plugins` as .tar.gz, zero network egress
+- **Cloud SaaS** — Next.js + managed Postgres + Redis + Claude API.
+- **On-prem Docker** — Single `docker compose up` with bundled Postgres and Redis.
+- **Airgapped Kubernetes** — Local LLM (Ollama / vLLM), plugins loaded from `/plugins` as `.tar.gz`, zero network egress.
 
 ## Contributing
 
-1. Create a feature branch from `main` (`feat/`, `fix/`, `refactor/`)
-2. Follow the code standards in `CLAUDE.md`
-3. Ensure CI passes (lint, typecheck, unit tests, E2E tests)
-4. Open a PR — squash merge into `main`
+1. Create a feature branch from `main` (`feat/`, `fix/`, `refactor/`).
+2. Follow the code standards in `CLAUDE.md`.
+3. Ensure CI passes (lint, typecheck, unit tests, E2E tests).
+4. Open a PR — squash merge into `main`.
 
 ## License
 
