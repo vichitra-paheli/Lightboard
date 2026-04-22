@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" aria-label="Lightboard">
+  <rect width="100" height="100" fill="#08080A"/>
+  <g fill="#EDEDEE">
+    <rect x="6" y="6" width="6" height="86" rx="3"/>
+    <rect x="6" y="88" width="88" height="6" rx="3"/>
+    <rect x="22" y="10" width="44.64" height="3.6" rx="1.8"/>
+    <rect x="34.96" y="17.78" width="44.64" height="3.6" rx="1.8"/>
+    <rect x="43.6" y="25.56" width="39.6" height="3.6" rx="1.8"/>
+    <rect x="22" y="33.33" width="43.2" height="3.6" rx="1.8"/>
+    <rect x="25.6" y="41.11" width="36" height="3.6" rx="1.8"/>
+    <rect x="22" y="48.89" width="54" height="3.6" rx="1.8"/>
+    <rect x="40" y="56.67" width="46.8" height="3.6" rx="1.8"/>
+    <rect x="43.6" y="64.44" width="46.8" height="3.6" rx="1.8"/>
+    <rect x="22" y="72.22" width="51.84" height="3.6" rx="1.8"/>
+    <rect x="25.6" y="80" width="36" height="3.6" rx="1.8"/>
+  </g>
+</svg>

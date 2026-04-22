@@ -1,7 +1,7 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
-import { LightboardSigil } from '@/components/brand';
+import { LightboardLogomark, LightboardSigil } from '@/components/brand';
 import { useUiStore } from '@/stores/ui-store';
 import { AgentPicker } from './agent-picker';
 import { IconButton } from './icon-button';
@@ -49,7 +49,10 @@ export function TopBar() {
             />
           </svg>
         </IconButton>
-        <LightboardSigil size={18} />
+        <div className="flex items-center gap-[10px] text-[var(--ink-1)]">
+          <LightboardLogomark size={20} title="" />
+          <LightboardSigil size={18} />
+        </div>
       </div>
 
       <nav className="flex justify-center gap-1" aria-label={t('primaryNav')}>
