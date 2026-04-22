@@ -109,16 +109,14 @@ Lightboard is a TypeScript monorepo built with Turborepo and pnpm workspaces. Th
 
 ```
 lightboard/
-├── apps/web/              # Next.js 15 (app router) — main application
+├── apps/web/              # Next.js 15 app + Playwright E2E specs under e2e/
 ├── packages/
 │   ├── agent/             # Multi-agent orchestration (leader + specialists)
 │   ├── connector-sdk/     # Data source adapter interface (JSON rows)
 │   ├── connectors/        # Postgres connector
 │   ├── db/                # Drizzle schema, auth, migrations
-│   ├── telemetry/         # OpenTelemetry SDK + built-in data source
 │   └── ui/                # shadcn/ui component library
-├── docker/                # Docker Compose for local dev
-└── e2e/                   # Playwright E2E tests
+└── docker/                # Docker Compose for local dev
 ```
 
 ### Tech stack
