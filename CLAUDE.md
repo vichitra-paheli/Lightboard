@@ -8,7 +8,7 @@ Lightboard is an AI-native data exploration and visualization platform. Users co
 
 ```
 lightboard/
-├── apps/web/              # Next.js 15 app (app router)
+├── apps/web/              # Next.js 15 app (app router) + Playwright specs under e2e/
 ├── packages/
 │   ├── connector-sdk/     # TypeScript interface for data sources
 │   ├── connectors/        # Postgres connector (others planned)
@@ -16,12 +16,8 @@ lightboard/
 │   ├── viz-core/          # visx chart components (legacy — agent now generates HTML)
 │   ├── agent/             # Multi-agent orchestration (leader + query/view/insights agents + scratchpad)
 │   ├── ui/                # shadcn/ui components (copied, not installed)
-│   ├── telemetry/         # OpenTelemetry SDK + built-in data source
 │   └── db/                # Drizzle ORM schema + migrations
-├── plugins/               # Local plugin tarballs (.tar.gz)
-├── docker/                # Dockerfiles + compose
-├── helm/                  # K8s Helm charts
-└── e2e/                   # Playwright E2E tests
+└── docker/                # Dockerfiles + compose
 ```
 
 ## Key abstractions
@@ -48,7 +44,7 @@ packages/agent/src/
 │   ├── leader.ts               # LeaderAgent — orchestrates conversation + delegates
 │   ├── query-agent.ts          # Query specialist (schema, raw SQL)
 │   ├── view-agent.ts           # View specialist (HTML visualization generation)
-│   └── insights-agent.ts       # Insights specialist (stats via DuckDB)
+│   └── insights-agent.ts       # Insights specialist (stats over the in-memory scratchpad)
 ├── scratchpad/
 │   ├── scratchpad.ts           # SessionScratchpad — per-session in-memory data store
 │   └── manager.ts              # ScratchpadManager — session lifecycle + cleanup
@@ -75,7 +71,7 @@ packages/agent/src/
 | Forms | react-hook-form + zod | Formik, final-form |
 | Layout grid | react-grid-layout | CSS grid (for drag/drop) |
 | ORM | Drizzle ORM | Prisma, TypeORM, Knex |
-| Auth | Lucia | NextAuth (unless OAuth needed) |
+| Auth | Session-based (Argon2 via @node-rs/argon2 + @oslojs/crypto for sessions) | NextAuth, Lucia |
 | i18n | next-intl | react-i18next, FormatJS |
 | Icons | lucide-react | heroicons, react-icons |
 | Testing | Vitest + Playwright + Testing Library | Jest, Cypress |
@@ -141,12 +137,7 @@ pnpm --filter @lightboard/query-ir test
 pnpm --filter @lightboard/viz-core storybook
 
 # Docker
-docker build -t lightboard .         # Production image (multi-stage, rootless)
-docker compose -f docker-compose.prod.yml up  # Production single-node
-
-# Plugins (airgap)
-lightboard plugin pack <name>        # Create .tar.gz on connected machine
-# Copy to /plugins directory, restart or POST /api/admin/plugins/reload
+docker compose up -d                 # Start local Postgres + Redis (single docker-compose.yml)
 ```
 
 ## Running migrations

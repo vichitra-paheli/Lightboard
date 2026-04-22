@@ -14,21 +14,20 @@ Lightboard is a TypeScript monorepo (Turborepo + pnpm workspaces):
 
 ```
 lightboard/
-├── apps/web/              # Next.js 15 (app router, Turbopack)
+├── apps/web/              # Next.js 15 (app router, Turbopack) + Playwright specs under e2e/
 ├── packages/
 │   ├── db/                # Drizzle ORM, auth, migrations
 │   ├── ui/                # shadcn/ui components (Button, Card, Input, Label)
-│   ├── query-ir/          # Query intermediate representation
+│   ├── query-ir/          # Query intermediate representation (legacy — connectors still use it)
 │   ├── connector-sdk/     # Data source adapter interface
 │   ├── connectors/postgres/ # PostgreSQL connector
-│   ├── compute/           # DuckDB compute engine
-│   ├── viz-core/          # visx charts, panel protocol, ViewSpec, auto-viz
-│   ├── agent/             # AI agent (Claude API + OpenAI-compatible)
-│   ├── telemetry/         # OpenTelemetry SDK + local exporter
-│   └── mcp-server/        # MCP server for programmatic operations
+│   ├── viz-core/          # visx charts, panel protocol, ViewSpec (legacy — agent now emits HTML)
+│   └── agent/             # Multi-agent orchestration (Claude API + OpenAI-compatible)
 ├── docker/                # Docker Compose (Postgres 16 + Redis 7)
 └── pnpm-workspace.yaml    # includes packages/* and packages/connectors/*
 ```
+
+**Not present** (scope-cutting reminders so you don't look for them): `packages/compute/` (DuckDB engine — planned, never built), `packages/mcp-server/` (also planned), `packages/telemetry/` (OpenTelemetry SDK — exists on disk but is orphaned with no consumers; do not wire it in unless explicitly asked), and `plugins/` / `helm/` at the root.
 
 ## Development Workflow
 
@@ -115,11 +114,10 @@ Common lint failures in CI that pass typecheck locally:
 
 ### 8. Browser Testing with Chrome Extension
 
-- Use `mcp__claude-in-chrome__*` tools for browser automation
-- The app runs on `http://192.168.1.17:3000` (network address), not `localhost`
-- Some Chrome extensions block the automation — if `javascript_tool` returns "Cannot access chrome-extension:// URL", try a new tab
-- For form submissions that fail via `fill()`, use `javascript_tool` to call the API directly then navigate
-- Always `wait` 2-3 seconds after navigation before taking screenshots
+- Use the Chrome DevTools MCP tools (`mcp__plugin_chrome-devtools-mcp_chrome-devtools__*`) for browser automation — navigate, snapshot, screenshot, evaluate scripts.
+- The app runs on `http://localhost:3000`.
+- For form submissions that fail via `fill()` under automation, fall back to calling the API route directly via `evaluate_script`, then navigate.
+- Use `wait_for` with a text anchor after navigation rather than sleeping — snapshots taken too early return half-rendered trees.
 
 ### 9. Package Dependencies
 
@@ -144,15 +142,15 @@ Every user-facing string goes through `next-intl`:
 - JSDoc on every export
 - Components < 150 lines, business logic in hooks
 - No code duplication > 3 lines
-- Apache Arrow IPC for data transfer, never JSON
+- **JSON rows** for agent query results (`{ columns, rows, rowCount }`). Arrow IPC remains in the connector interface for backward compatibility, but agent tools return JSON.
 - react-query for all server state
 - Feature branches only, squash merge
 
 ## Available Test Infrastructure
 
 - **Unit tests**: Vitest across all packages
-- **E2E tests**: Playwright in `apps/web/e2e/auth.spec.ts` (13 tests)
-- **Storybook**: `pnpm --filter @lightboard/viz-core storybook` for chart visual testing
+- **E2E tests**: Playwright in `apps/web/e2e/` (currently `auth.spec.ts`, `agent-chat.spec.ts`, `multi-agent-chat.spec.ts`)
+- **Storybook**: `pnpm --filter @lightboard/viz-core storybook` for chart visual testing (legacy)
 - **Docker**: `docker compose up -d` for Postgres + Redis
 - **Sample database**: Postgres on `localhost:5434`, database `cricket`, user `cricket_user`, password `cricket_pass`
 
@@ -161,17 +159,17 @@ Every user-facing string goes through `next-intl`:
 ```bash
 pnpm dev                    # Start dev server (Turbopack)
 pnpm build                  # Production build
-pnpm test                   # All unit tests (203+)
+pnpm test                   # All unit tests (Vitest across every package)
 pnpm typecheck              # TypeScript across all packages
 pnpm --filter @lightboard/web lint   # ESLint
 cd apps/web && npx playwright test    # E2E tests
 
-pnpm --filter @lightboard/db db:push      # Push schema to Postgres
+pnpm --filter @lightboard/db db:migrate   # Apply journaled migrations (do not use db:push — it is for throwaway experiments only)
 pnpm --filter @lightboard/db db:seed      # Seed demo data
-pnpm --filter @lightboard/viz-core storybook  # Chart Storybook
+pnpm --filter @lightboard/viz-core storybook  # Chart Storybook (legacy visx)
 
-docker compose up -d        # Start Postgres + Redis
-docker start lightboard-postgres lightboard-redis  # Restart existing
+docker compose up -d           # Start Postgres + Redis
+docker compose start postgres redis  # Restart existing services
 ```
 
 ## PR Template

@@ -26,30 +26,29 @@ You do NOT write code. You create the plan that guides code creation.
 
 ```
 lightboard/
-├── apps/web/              # Next.js 15 (app router) — UI + API routes
+├── apps/web/              # Next.js 15 (app router) — UI + API routes + Playwright e2e/
 ├── packages/
 │   ├── db/                # Drizzle ORM, auth, migrations, crypto
 │   ├── ui/                # shadcn/ui components (Button, Card, Input, Label)
-│   ├── query-ir/          # Query intermediate representation (types + Zod + utils)
+│   ├── query-ir/          # Query intermediate representation (legacy — connector-only)
 │   ├── connector-sdk/     # Connector interface + registry
 │   ├── connectors/postgres/ # PostgreSQL connector (IR→SQL, Arrow, streaming)
-│   ├── compute/           # DuckDB compute engine (cross-source joins, CSV/Parquet)
-│   ├── viz-core/          # Charts (visx), panel protocol, ViewSpec, auto-viz, Storybook
-│   ├── agent/             # AI agent (Claude + OpenAI-compatible providers, tools, prompts)
-│   ├── telemetry/         # OpenTelemetry SDK, metrics, local exporter, TelemetryConnector
-│   └── mcp-server/        # MCP server (5 Phase 1 tools)
+│   ├── viz-core/          # Charts (visx), panel protocol, ViewSpec (legacy — agent emits HTML)
+│   └── agent/             # Multi-agent orchestration (leader + query/view/insights + scratchpad)
 ├── docker/                # Docker Compose (Postgres 16 + Redis 7)
 └── documentation/         # Phase plans, QA test plans
 ```
 
+**Planned but not built** (so you do not scope issues against packages that do not exist): `packages/compute/` (DuckDB compute engine for cross-source joins / CSV / Parquet), `packages/mcp-server/`, and a dedicated `plugins/` tarball system. `packages/telemetry/` is on disk but orphaned — has no consumers and is not wired into the web app. If an issue needs any of these, call out the missing prerequisite package as an explicit pre-step.
+
 ### Key Architectural Patterns
 
-- **QueryIR** is the lingua franca — every query flows through it. Agent produces it, connectors translate it.
-- **ViewSpec** is the agent's output — a JSON document describing query + chart + controls.
+- **QueryIR** is the connector lingua franca — connectors still translate it to native SQL, but the agent no longer produces it (the agent writes raw SQL directly via `run_sql`).
+- **HtmlView** is the agent's current visualization output — a complete self-contained HTML document. The older **ViewSpec** (JSON query + chart + controls) still exists in `viz-core` for backward compatibility.
 - **Connector interface** is the adapter pattern — every data source implements `connect`, `introspect`, `query`, `stream`, `healthCheck`, `capabilities`, `disconnect`.
-- **PanelPlugin** is the viz adapter — charts register as plugins with `id`, `configSchema`, `dataShape`, `Component`.
+- **PanelPlugin** is the legacy viz adapter — deprecated; new visualizations come from the agent.
 - **RLS on every table** — all tables have `org_id`, Postgres RLS enforces tenant isolation. Route handlers use `withAuth` wrapper.
-- **Arrow IPC** for data transfer — never JSON between server↔client for query results.
+- **JSON rows** between the agent and the web app (`{ columns, rows, rowCount }`). Arrow IPC is still how connectors return data internally; it does not reach the browser.
 
 ### Tech Stack (non-negotiable)
 
