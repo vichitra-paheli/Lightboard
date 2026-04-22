@@ -139,7 +139,17 @@ export function Thread({
     >
       <div
         className="relative mx-auto"
-        style={{ maxWidth: 920, padding: '28px 48px 40px' }}
+        // `viewTransitionName` opts the centered content column into the
+        // scoped `thread-content` view transition declared in globals.css.
+        // The outer scroll container above is intentionally excluded so the
+        // scrollbar position doesn't flicker mid-fade. Keeping the value
+        // alongside the other layout-only inline styles is acceptable per
+        // CLAUDE.md: Tailwind has no utility for `view-transition-name`.
+        style={{
+          maxWidth: 920,
+          padding: '28px 48px 40px',
+          viewTransitionName: 'thread-content',
+        }}
       >
         {hasMessages && (
           <ConversationHeader
