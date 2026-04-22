@@ -105,7 +105,7 @@ After running the seed script:
 
 ## Architecture
 
-Lightboard is a TypeScript monorepo built with Turborepo and pnpm workspaces. The web app is a Next.js 15 app-router application that talks to a multi-agent orchestration layer: a **leader** routes each question to one of three specialists — **query** (schema introspection and raw SQL), **view** (designs the chart and its editorial framing), or **insights** (stats and narration via an in-memory DuckDB scratchpad). Data sources plug in through a connector SDK.
+Lightboard is a TypeScript monorepo built with Turborepo and pnpm workspaces. The web app is a Next.js 15 app-router application that talks to a multi-agent orchestration layer: a **leader** routes each question to one of three specialists — **query** (schema introspection and raw SQL), **view** (designs the chart and its editorial framing), or **insights** (stats and narration over an in-memory session scratchpad). Data sources plug in through a connector SDK.
 
 ```
 lightboard/
@@ -132,7 +132,6 @@ lightboard/
 | ORM | Drizzle ORM + PostgreSQL |
 | Cache | Redis (ioredis) |
 | Auth | Session-based (Argon2 + oslo) |
-| Analytics scratchpad | DuckDB (in-memory, per session) |
 | Testing | Vitest + Playwright + Testing Library |
 
 ## Development
