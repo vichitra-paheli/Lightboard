@@ -11,7 +11,7 @@ Lightboard turns a natural-language question into a branded, narrated visualizat
 </p>
 
 <p align="center">
-  <img src="./docs/screenshots/hero-explore.png" alt="Exploring an IPL cricket dataset in Lightboard — the sidebar lists saved conversations, the main panel shows a bar chart of top batsmen by total runs, and the filmstrip chip at the top right counts generated views." />
+  <img src="./docs/screenshots/hero-explore.png" alt="Exploring an IPL cricket dataset in Lightboard — the sidebar lists saved conversations, the main panel renders a multi-coloured bar chart of top teams by total runs with a magazine-style headline and subtitle, and a filmstrip chip at the top right counts generated views." />
 </p>
 
 ## What it does
@@ -23,9 +23,9 @@ Pick a data source, ask a question, and Lightboard answers with a full editorial
 <table>
 <tr>
 <td width="50%" valign="top">
-<img src="./docs/screenshots/hero-explore.png" alt="Natural-language exploration" /><br/>
+<img src="./docs/screenshots/feature-exploration.png" alt="Natural-language exploration" /><br/>
 <strong>Natural-language exploration</strong><br/>
-Ask in English. Lightboard writes the SQL, runs it on your database, and renders an interactive chart — no spreadsheet in between.
+Ask in English. Lightboard writes the SQL, runs it on your database, and renders an interactive chart — with follow-up chips queued up for your next question.
 </td>
 <td width="50%" valign="top">
 <img src="./docs/screenshots/feature-narration.png" alt="Narrated takeaways" /><br/>
@@ -50,6 +50,7 @@ Every chart you generate in a session stays one click away in the filmstrip — 
 ## Why Lightboard
 
 - **AI-native by design.** A multi-agent system — a leader plus query, view, and insights specialists — writes the SQL, designs the chart, and narrates the finding. It is not a chatbot bolted onto a dashboard.
+- **Bring your own model.** Works with Anthropic Claude or any OpenAI-compatible endpoint — cloud or local. Actively tuned against Claude Sonnet 4.6 and local Qwen 3.6 35b, so it runs equally well on the frontier or on a single workstation.
 - **Opinionated visuals.** The agent emits a complete, sandboxed HTML document per view. No chart-config UI, no color-picker rabbit holes — the output *is* the config.
 - **Deploy anywhere.** The same codebase runs as cloud SaaS, single-node Docker, or a fully airgapped Kubernetes install with a local LLM. No telemetry, no mandatory calls home.
 - **Pure TypeScript monorepo.** No AGPL, no Go, no JVM. One `pnpm install` and you are running.
