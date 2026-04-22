@@ -11,7 +11,7 @@ Lightboard turns a natural-language question into a branded, narrated visualizat
 </p>
 
 <p align="center">
-  <video src="./docs/videos/Lightboard.mp4" alt="Exploring an IPL cricket dataset in Lightboard — the sidebar lists saved conversations, the main panel renders a multi-coloured bar chart of top teams by total runs with a magazine-style headline and subtitle, and a filmstrip chip at the top right counts generated views." />
+  <video src="https://github.com/user-attachments/assets/f79ae2fd-3e6e-4188-96d7-3a52fe311061" alt="Exploring an IPL cricket dataset in Lightboard — the sidebar lists saved conversations, the main panel renders a multi-coloured bar chart of top teams by total runs with a magazine-style headline and subtitle, and a filmstrip chip at the top right counts generated views." />
 </p>
 
 ## What it does
