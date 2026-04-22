@@ -52,7 +52,7 @@ Every chart you generate in a session stays one click away in the filmstrip — 
 - **AI-native by design.** A multi-agent system — a leader plus query, view, and insights specialists — writes the SQL, designs the chart, and narrates the finding. It is not a chatbot bolted onto a dashboard.
 - **Bring your own model.** Works with Anthropic Claude or any OpenAI-compatible endpoint — cloud or local. Actively tuned against Claude Sonnet 4.6 and local Qwen 3.6 35b, so it runs equally well on the frontier or on a single workstation.
 - **Opinionated visuals.** Every answer is typeset like a magazine figure — editorial headline, brand-aligned color ramp, narration below. No chart-config UI, no color-picker rabbit holes; the output *is* the config.
-- **Pure TypeScript monorepo.** No AGPL, no Go, no JVM. One `pnpm install` and you are running.
+- **Pure TypeScript monorepo.** One `pnpm install` and you are running.
 
 ## Planned features
 
