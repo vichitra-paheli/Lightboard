@@ -11,7 +11,7 @@ Lightboard turns a natural-language question into a branded, narrated visualizat
 </p>
 
 <p align="center">
-  <img src="./docs/screenshots/hero-explore.png" alt="Exploring an IPL cricket dataset in Lightboard — the sidebar lists saved conversations, the main panel renders a multi-coloured bar chart of top teams by total runs with a magazine-style headline and subtitle, and a filmstrip chip at the top right counts generated views." />
+  <video src="https://github.com/user-attachments/assets/f79ae2fd-3e6e-4188-96d7-3a52fe311061" alt="Exploring an IPL cricket dataset in Lightboard — the sidebar lists saved conversations, the main panel renders a multi-coloured bar chart of top teams by total runs with a magazine-style headline and subtitle, and a filmstrip chip at the top right counts generated views." />
 </p>
 
 ## What it does
@@ -50,15 +50,26 @@ Every chart you generate in a session stays one click away in the filmstrip — 
 ## Why Lightboard
 
 - **AI-native by design.** A multi-agent system — a leader plus query, view, and insights specialists — writes the SQL, designs the chart, and narrates the finding. It is not a chatbot bolted onto a dashboard.
-- **Bring your own model.** Works with Anthropic Claude or any OpenAI-compatible endpoint — cloud or local. Actively tuned against Claude Sonnet 4.6 and local Qwen 3.6 35b, so it runs equally well on the frontier or on a single workstation.
 - **Opinionated visuals.** Every answer is typeset like a magazine figure — editorial headline, brand-aligned color ramp, narration below. No chart-config UI, no color-picker rabbit holes; the output *is* the config.
+- **Bring your own model.** Works with Anthropic Claude or any OpenAI-compatible endpoint — cloud or local. Actively tuned against Claude Sonnet 4.6 and local Qwen 3.6 35b, so it runs equally well on the frontier or on a single workstation.
 - **Pure TypeScript monorepo.** One `pnpm install` and you are running.
+
+## Trust and transparency
+
+Text-to-SQL tools fail in quiet, hard-to-spot ways — a wrong join, a fan-out double count, the right column read with the wrong semantics. Lightboard addresses this with mechanisms you can see and, increasingly, edit.
+
+**Schema context you control.** When you connect a data source, Lightboard generates a first-pass schema context document — tables, columns, join paths, and the concepts they express. You refine it directly, or through conversation with an introspection agent. Every agent reads from this document on every question, so answers are grounded in how *your* data actually works, not how the model guessed it might. Our own working test corpus is a 20+-table ball-by-ball cricket dataset with dirty joins and unmatched free text; the grounding loop holds up on it, and on cleaner schemas it only gets easier.
+
+**Visible SQL.** Every chart is rendered from a query you can inspect. The agent does not hide its working — if an answer looks wrong, the query is right there.
+
+**Editable SQL (planned).** Query edits will round-trip into the conversation, directly or AI-assisted ("fix this join", "left-join and filter by season"). The agent will reconcile its understanding from your edit, so follow-up questions build on your version rather than its original.
 
 ## Planned features
 
 - **Reusable visualizations.** Save any generated view and pull it — or a remix of it — into a later conversation without starting from a blank prompt.
 - **Post-visualization data filtering.** Slice, bucket, and drill into a chart's underlying rows without round-tripping another prompt.
 - **Composable dashboards.** Arrange saved views into a dashboard whose data refreshes automatically as the underlying source evolves.
+- **Editable queries.** Direct or AI-assisted edits to generated SQL, reconciled into the agent's context for the rest of the conversation.
 
 ## Quick start
 
