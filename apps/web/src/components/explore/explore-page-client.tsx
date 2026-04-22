@@ -11,8 +11,10 @@ import {
 } from '@lightboard/viz-core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslations } from 'next-intl';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { persistedToUi, type PersistedMessage } from '@/lib/agent-stream/persisted-to-ui';
 import { queryKeys } from '@/lib/query-keys';
 
 // Register chart panel plugins on module load so legacy ViewSpec paths
@@ -96,6 +98,10 @@ export function ExplorePageClient() {
   const schemaGenerationTriggered = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const queryClient = useQueryClient();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  // Guards `?c=<id>` mount-load against double-firing in dev/strict mode.
+  const initialLoadHandled = useRef(false);
 
   /**
    * Load the org's data sources and project them into the `DataSourceOption`
@@ -532,7 +538,9 @@ export function ExplorePageClient() {
           },
           body: JSON.stringify({
             message,
-            sourceId: selectedSource,
+            // Canonical key — the route also accepts `sourceId` as a legacy
+            // alias, but new senders should always supply `dataSourceId`.
+            dataSourceId: selectedSource,
             conversationId,
           }),
           signal: controller.signal,
@@ -742,12 +750,80 @@ export function ExplorePageClient() {
     );
   }, [selectedSource, dataSources, handleSend]);
 
+  /**
+   * Load a previously-persisted conversation into the thread by id. Pulls
+   * the transcript from `/api/conversations/[id]`, hydrates the parts[] via
+   * the persisted-to-ui adapter, and switches the picker to the
+   * conversation's original data source so follow-up turns hit the same
+   * connection. Aborts any in-flight stream first so a half-rendered
+   * assistant turn doesn't leak into the loaded transcript.
+   */
+  const handleLoadConversation = useCallback(
+    async (id: string) => {
+      handleStop();
+      try {
+        const res = await fetch(`/api/conversations/${id}`);
+        if (!res.ok) {
+          console.error(`[Explore] Failed to load conversation ${id}: HTTP ${res.status}`);
+          return;
+        }
+        const body = (await res.json()) as {
+          conversation?: { id: string; dataSourceId: string | null };
+          messages?: PersistedMessage[];
+        };
+        if (!body.conversation || !body.messages) return;
+        setConversationId(id);
+        setMessages(persistedToUi(body.messages));
+        setActiveViewIndex(-1);
+        // Snap the picker back to the conversation's source so the next
+        // turn inherits the same connection. If the source has been
+        // deleted (dataSourceId === null) we leave the current selection
+        // alone — the user can pick something else.
+        const targetSource = body.conversation.dataSourceId;
+        if (targetSource && targetSource !== selectedSource) {
+          setSelectedSource(targetSource);
+        }
+      } catch (err) {
+        console.error(`[Explore] Error loading conversation ${id}:`, err);
+      }
+    },
+    [handleStop, selectedSource],
+  );
+
   const handleNewConversation = useCallback(() => {
     handleStop();
     setMessages([]);
     setActiveViewIndex(-1);
     setConversationId(null);
   }, [handleStop]);
+
+  /**
+   * Sync the active conversation id with the `?c=<id>` URL param so a hard
+   * reload restores the user's place. On mount, load the conversation
+   * pointed to by the URL (one-shot, guarded by `initialLoadHandled`).
+   * Subsequent `conversationId` changes write back to the URL.
+   */
+  useEffect(() => {
+    if (initialLoadHandled.current) return;
+    initialLoadHandled.current = true;
+    const initial = searchParams?.get('c');
+    if (initial) {
+      void handleLoadConversation(initial);
+    }
+  }, [searchParams, handleLoadConversation]);
+
+  useEffect(() => {
+    const current = searchParams?.get('c') ?? null;
+    if (conversationId === current) return;
+    const params = new URLSearchParams(searchParams?.toString() ?? '');
+    if (conversationId) {
+      params.set('c', conversationId);
+    } else {
+      params.delete('c');
+    }
+    const qs = params.toString();
+    router.replace(qs ? `?${qs}` : '?');
+  }, [conversationId, router, searchParams]);
 
   /**
    * Install the Explore sidebar into the shell on mount; clear it on
@@ -763,12 +839,21 @@ export function ExplorePageClient() {
         selectedId={selectedSource}
         onSelectSource={setSelectedSource}
         onNewChat={handleNewConversation}
+        activeConversationId={conversationId}
+        onSelectConversation={handleLoadConversation}
       />,
     );
     return () => {
       setSidebarSlot(null);
     };
-  }, [dataSources, selectedSource, handleNewConversation, setSidebarSlot]);
+  }, [
+    dataSources,
+    selectedSource,
+    handleNewConversation,
+    setSidebarSlot,
+    conversationId,
+    handleLoadConversation,
+  ]);
 
   // Active source metadata for the composer dek. Tables/rows are not yet
   // exposed on the data-source API; pass just the name for now.

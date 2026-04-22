@@ -1,102 +1,158 @@
 'use client';
 
+import { useQuery } from '@tanstack/react-query';
+import { useTranslations } from 'next-intl';
+import { useMemo } from 'react';
+
 import { Label } from './label';
 
-/**
- * One conversation entry in a group.
- */
-interface ConvoItem {
+/** One conversation row returned by `GET /api/conversations`. */
+interface ConversationRow {
   id: string;
   title: string;
+  dataSourceId: string | null;
+  lastMessageAt: string;
+  createdAt: string;
 }
 
 /**
- * Group of conversations shown under a single time bucket (Today, Yesterday, ...).
+ * Time bucket the sidebar groups by. The buckets stay client-side so the API
+ * doesn't have to know the user's locale or "today" boundary.
  */
-interface ConvoGroup {
-  label: string;
-  items: ConvoItem[];
-}
+type GroupKey = 'today' | 'yesterday' | 'thisWeek' | 'older';
 
-/**
- * MOCK: Replace with real conversations once backend persistence lands
- * (see documentation/backend-ui-polish-followups.md §4). These fixtures
- * match the editorial handoff's example so the sidebar looks correct
- * during visual review before the wire-up ticket is done.
- */
-const MOCK_GROUPS: ConvoGroup[] = [
-  {
-    label: 'Today',
-    items: [
-      { id: 'c1', title: 'Post 2014 IPL True Strike Rate' },
-      { id: 'c2', title: 'RCB Team Analysis' },
-    ],
-  },
-  {
-    label: 'Yesterday',
-    items: [
-      { id: 'c3', title: 'Toss decision · win %' },
-      { id: 'c4', title: 'Death overs economy' },
-    ],
-  },
-  {
-    label: 'This week',
-    items: [
-      { id: 'c5', title: 'Fielder impact model v2' },
-      { id: 'c6', title: 'Venue-adjusted averages' },
-      { id: 'c7', title: 'Powerplay SR trends' },
-    ],
-  },
-];
-
-/**
- * Props for {@link ConversationsList}.
- */
+/** Props for {@link ConversationsList}. */
 interface ConversationsListProps {
+  /**
+   * Currently selected data source id. When non-null, the API filters the
+   * list to that source. When null, the list shows every conversation in
+   * the org (the all-conversations surface — currently never reached
+   * because the picker is required, but kept as a clean fallback).
+   */
+  sourceId: string | null;
   /** Id of the currently-active conversation, if any. */
   activeId?: string | null;
-  /** Called with the id of the selected conversation. No-op by default. */
+  /** Called with the id of a clicked conversation. */
   onSelect?: (id: string) => void;
 }
 
 /**
  * Grouped, time-bucketed conversations rendered in the Explore sidebar.
  *
- * Currently ships with hardcoded editorial fixture data — real conversation
- * titles come from the backend persistence ticket (see backend followups §4).
- * Selection is optional; when no handler is wired, clicks are no-ops.
+ * Replaces the historical hardcoded fixture — the list is now driven by
+ * `useQuery` against `/api/conversations?sourceId=<id>`. Switching the
+ * picker invalidates the query key and refetches automatically. Bucketing
+ * is computed client-side from `lastMessageAt` so the API stays a flat
+ * sorted list.
  */
-export function ConversationsList({ activeId, onSelect }: ConversationsListProps) {
+export function ConversationsList({
+  sourceId,
+  activeId,
+  onSelect,
+}: ConversationsListProps) {
+  const t = useTranslations('explore');
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['conversations', sourceId],
+    queryFn: async (): Promise<ConversationRow[]> => {
+      const params = sourceId ? `?sourceId=${encodeURIComponent(sourceId)}` : '';
+      const res = await fetch(`/api/conversations${params}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const body = (await res.json()) as { conversations?: ConversationRow[] };
+      return body.conversations ?? [];
+    },
+    staleTime: 30_000,
+  });
+
+  const groups = useMemo(() => bucketize(data ?? []), [data]);
+  const groupOrder: GroupKey[] = ['today', 'yesterday', 'thisWeek', 'older'];
+  const labelMap: Record<GroupKey, string> = {
+    today: t('conversationsToday'),
+    yesterday: t('conversationsYesterday'),
+    thisWeek: t('conversationsThisWeek'),
+    older: t('conversationsOlder'),
+  };
+
+  const isEmpty = !isLoading && (data?.length ?? 0) === 0;
+
   return (
     <div className="flex flex-col gap-3.5">
-      <Label>Conversations</Label>
-      {MOCK_GROUPS.map((g) => (
-        <div key={g.label}>
-          <div
-            className="lb-mono-tag uppercase"
-            style={{
-              fontSize: 9,
-              letterSpacing: '0.1em',
-              color: 'var(--ink-6)',
-              padding: '0 4px 4px',
-            }}
-          >
-            {g.label}
-          </div>
-          <div className="flex flex-col gap-px">
-            {g.items.map((i) => (
-              <ConvoItemButton
-                key={i.id}
-                item={i}
-                active={i.id === activeId}
-                onSelect={onSelect}
-              />
-            ))}
-          </div>
+      <Label>{t('conversationsHeading')}</Label>
+      {isEmpty && (
+        <div
+          className="px-2.5 text-[12px]"
+          style={{ color: 'var(--ink-5)' }}
+        >
+          {t('conversationsEmpty')}
         </div>
-      ))}
+      )}
+      {groupOrder.map((key) => {
+        const items = groups[key];
+        if (!items || items.length === 0) return null;
+        return (
+          <div key={key}>
+            <div
+              className="lb-mono-tag uppercase"
+              style={{
+                fontSize: 9,
+                letterSpacing: '0.1em',
+                color: 'var(--ink-6)',
+                padding: '0 4px 4px',
+              }}
+            >
+              {labelMap[key]}
+            </div>
+            <div className="flex flex-col gap-px">
+              {items.map((row) => (
+                <ConvoItemButton
+                  key={row.id}
+                  item={row}
+                  active={row.id === activeId}
+                  onSelect={onSelect}
+                />
+              ))}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
+}
+
+/**
+ * Bucket conversations into Today / Yesterday / This week / Older using a
+ * locally-computed "now" so the user's clock — not the server's — defines
+ * the boundary. Inputs are assumed to be sorted newest-first by the API; the
+ * bucket order preserves that relative order within each bucket.
+ */
+function bucketize(rows: ConversationRow[]): Record<GroupKey, ConversationRow[]> {
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfYesterday = new Date(startOfToday);
+  startOfYesterday.setDate(startOfToday.getDate() - 1);
+  const startOfWeek = new Date(startOfToday);
+  startOfWeek.setDate(startOfToday.getDate() - 7);
+
+  const out: Record<GroupKey, ConversationRow[]> = {
+    today: [],
+    yesterday: [],
+    thisWeek: [],
+    older: [],
+  };
+
+  for (const row of rows) {
+    const ts = new Date(row.lastMessageAt);
+    if (ts >= startOfToday) {
+      out.today.push(row);
+    } else if (ts >= startOfYesterday) {
+      out.yesterday.push(row);
+    } else if (ts >= startOfWeek) {
+      out.thisWeek.push(row);
+    } else {
+      out.older.push(row);
+    }
+  }
+  return out;
 }
 
 /**
@@ -108,7 +164,7 @@ function ConvoItemButton({
   active,
   onSelect,
 }: {
-  item: ConvoItem;
+  item: ConversationRow;
   active: boolean;
   onSelect?: (id: string) => void;
 }) {

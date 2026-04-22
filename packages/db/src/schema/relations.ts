@@ -1,6 +1,7 @@
 import { relations } from 'drizzle-orm';
 
 import { agentRoleAssignments } from './agent-role-assignments';
+import { conversationMessages, conversations } from './conversations';
 import { dataSources } from './data-sources';
 import { modelConfigs } from './model-configs';
 import { organizations } from './organizations';
@@ -78,5 +79,34 @@ export const agentRoleAssignmentsRelations = relations(agentRoleAssignments, ({ 
   modelConfig: one(modelConfigs, {
     fields: [agentRoleAssignments.modelConfigId],
     references: [modelConfigs.id],
+  }),
+}));
+
+/** Conversation belongs to an org, a creator, and (optionally) a data source. */
+export const conversationsRelations = relations(conversations, ({ one, many }) => ({
+  organization: one(organizations, {
+    fields: [conversations.orgId],
+    references: [organizations.id],
+  }),
+  creator: one(users, {
+    fields: [conversations.createdBy],
+    references: [users.id],
+  }),
+  dataSource: one(dataSources, {
+    fields: [conversations.dataSourceId],
+    references: [dataSources.id],
+  }),
+  messages: many(conversationMessages),
+}));
+
+/** Conversation message belongs to an org and a conversation. */
+export const conversationMessagesRelations = relations(conversationMessages, ({ one }) => ({
+  organization: one(organizations, {
+    fields: [conversationMessages.orgId],
+    references: [organizations.id],
+  }),
+  conversation: one(conversations, {
+    fields: [conversationMessages.conversationId],
+    references: [conversations.id],
   }),
 }));

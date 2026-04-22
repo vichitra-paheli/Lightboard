@@ -14,7 +14,15 @@ export {
   type AgentTask,
   type SubAgentResult,
 } from './agents';
-export { ConversationManager } from './conversation';
+export {
+  ConversationManager,
+  hydratePersistedMessage,
+  summarizeToolResult,
+  toPersistedMessages,
+  toPersistedMessagesWithNames,
+  type PersistedRow,
+  type PersistedToolResult,
+} from './conversation';
 export {
   ClaudeProvider,
   type ClaudeProviderConfig,
