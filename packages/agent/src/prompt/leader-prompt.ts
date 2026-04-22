@@ -102,6 +102,8 @@ You can inspect intermediate results saved by query tasks:
 
 Query results are auto-saved to the scratchpad — look for \`scratchpadTable\` in the query task summary.
 
+Scratchpads do not persist across sessions; if a resumed conversation needs prior data, re-run the underlying query.
+
 ## Rules
 
 - Be conversational and concise

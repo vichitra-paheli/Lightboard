@@ -8,19 +8,23 @@ import {
 } from '@/lib/data-source-service';
 import { checkRateLimit, addRateLimitHeaders } from '@/lib/rate-limit';
 import { redis } from '@/lib/redis';
-import { dataSources } from '@lightboard/db/schema';
-import { eq } from 'drizzle-orm';
+import type { Database } from '@lightboard/db';
+import { conversationMessages, conversations, dataSources } from '@lightboard/db/schema';
+import { and, asc, eq, sql } from 'drizzle-orm';
 import {
   LeaderAgent,
   ScratchpadManager,
   LLMError,
   generateSchemaContext,
   ConversationLog,
+  hydratePersistedMessage,
+  toPersistedMessagesWithNames,
   wrapToolContext,
   defaultLogDir,
   type AgentDataSource,
   type AgentEvent,
   type Message,
+  type PersistedToolResult,
   type ToolContext,
 } from '@lightboard/agent';
 import { resolveAIProviders } from '@/lib/ai-provider';
@@ -39,8 +43,16 @@ const scratchpadManager = new ScratchpadManager({
  * Leaders persist across turns to maintain conversation state in-memory,
  * avoiding Redis round-trips and keeping the ConversationManager warm.
  * Entries expire after 1 hour of inactivity.
+ *
+ * `priorSeq` tracks the highest `conversation_messages.sequence` we have
+ * already persisted for this session. Each turn writes only the diff between
+ * the leader's in-memory history and that watermark, so multi-turn chats
+ * never re-insert the same row.
  */
-const leaderCache = new Map<string, { leader: LeaderAgent; lastAccess: number }>();
+const leaderCache = new Map<
+  string,
+  { leader: LeaderAgent; lastAccess: number; priorSeq: number }
+>();
 
 /** Max age for cached leaders before eviction (1 hour). */
 const LEADER_CACHE_MAX_AGE_MS = 60 * 60 * 1000;
@@ -79,7 +91,7 @@ const AGENT_RATE_LIMIT_BUCKET = 'query' as const;
  * Supports conversation persistence via Redis-backed sessions.
  * When Accept: text/event-stream is set, streams SSE events.
  */
-export const POST = withAuth(async (req, { db, orgId }) => {
+export const POST = withAuth(async (req, { db, orgId, user }) => {
   let body: Record<string, unknown>;
   try {
     body = await req.json();
@@ -87,16 +99,33 @@ export const POST = withAuth(async (req, { db, orgId }) => {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  const { message, conversationId } = body as {
+  // Accept both `dataSourceId` (canonical) and `sourceId` (legacy client field)
+  // so the existing explore-page-client keeps working without a coordinated
+  // ship. Empty string from the picker is treated as "no source selected".
+  const {
+    message,
+    conversationId,
+    dataSourceId: rawDataSourceId,
+    sourceId,
+  } = body as {
     message?: string;
     conversationId?: string;
+    dataSourceId?: string | null;
+    sourceId?: string | null;
   };
+
+  const dataSourceId =
+    typeof rawDataSourceId === 'string' && rawDataSourceId
+      ? rawDataSourceId
+      : typeof sourceId === 'string' && sourceId
+      ? sourceId
+      : null;
 
   if (!message) {
     return NextResponse.json({ error: 'Message is required' }, { status: 400 });
   }
 
-  console.log(`[Chat] ← "${message.slice(0, 100)}" (conv=${conversationId ?? 'new'}, org=${orgId})`);
+  console.log(`[Chat] ← "${message.slice(0, 100)}" (conv=${conversationId ?? 'new'}, source=${dataSourceId ?? 'none'}, org=${orgId})`);
 
   // Rate limiting
   const rateResult = await checkRateLimit(orgId, AGENT_RATE_LIMIT_BUCKET);
@@ -196,8 +225,26 @@ export const POST = withAuth(async (req, { db, orgId }) => {
     },
   };
 
-  // Generate or reuse conversation/session ID
-  const sessionId = conversationId ?? `conv_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
+  // Resolve the canonical conversation id. The DB UUID is the session key —
+  // we no longer fabricate a `conv_<ts>_<rand>` prefix because every
+  // resumable conversation must be addressable from the sidebar by id.
+  let sessionId: string;
+  try {
+    sessionId = await resolveConversationId({
+      db,
+      orgId,
+      userId: user.id,
+      conversationId,
+      dataSourceId,
+      message,
+    });
+  } catch (err) {
+    console.error('[Chat] Failed to resolve conversation row:', err);
+    return NextResponse.json(
+      { error: 'Could not create or load this conversation. Please try again.' },
+      { status: 500 },
+    );
+  }
 
   // Passive conversation log — one JSONL per turn. Advisory; failures never
   // block the response. Consumed later (eval / past-mistakes curation).
@@ -216,10 +263,12 @@ export const POST = withAuth(async (req, { db, orgId }) => {
   // Reuse existing LeaderAgent for this session, or create a new one.
   // Leaders persist across turns to keep conversation state in-memory.
   let leader: LeaderAgent;
+  let priorSeq: number;
   const cached = leaderCache.get(sessionId);
   if (cached) {
     leader = cached.leader;
     cached.lastAccess = Date.now();
+    priorSeq = cached.priorSeq;
     // Rebind the tool context so this turn's conversation log captures
     // SQL + schema calls made by the cached leader.
     leader.setToolContext(loggedToolContext);
@@ -234,27 +283,41 @@ export const POST = withAuth(async (req, { db, orgId }) => {
       maxTokensPerRole,
     });
 
-    // Load conversation history from Redis for cold-start recovery
-    if (conversationId) {
-      const stored = await loadConversation(orgId, conversationId);
-      if (stored) {
-        leader.loadHistory(stored);
-      }
-    }
+    // Cold-start recovery: prefer the warm Redis mirror, fall back to the DB
+    // when Redis is empty (TTL expired, server restart, or this is a chat the
+    // user resumed from the sidebar a week later).
+    priorSeq = await hydrateLeader({
+      db,
+      orgId,
+      sessionId,
+      conversationId,
+      leader,
+    });
 
-    leaderCache.set(sessionId, { leader, lastAccess: Date.now() });
+    leaderCache.set(sessionId, { leader, lastAccess: Date.now(), priorSeq });
   }
 
   // Check if client wants SSE streaming
   const acceptHeader = req.headers.get('Accept') ?? '';
   const wantsStream = acceptHeader.includes('text/event-stream');
 
-  console.log(`[Chat] Mode: ${wantsStream ? 'SSE streaming' : 'JSON'}, session=${sessionId}`);
+  console.log(`[Chat] Mode: ${wantsStream ? 'SSE streaming' : 'JSON'}, session=${sessionId}, priorSeq=${priorSeq}`);
   if (wantsStream) {
-    return handleStreaming(leader, message, orgId, sessionId, sourcesNeedingBootstrap, adminDb, agentDataSources, convLog);
+    return handleStreaming(
+      leader,
+      message,
+      orgId,
+      sessionId,
+      sourcesNeedingBootstrap,
+      adminDb,
+      agentDataSources,
+      convLog,
+      db,
+      priorSeq,
+    );
   }
 
-  return handleNonStreaming(leader, message, orgId, sessionId, convLog);
+  return handleNonStreaming(leader, message, orgId, sessionId, convLog, db, priorSeq);
 });
 
 /**
@@ -266,6 +329,8 @@ async function handleNonStreaming(
   orgId: string,
   sessionId: string,
   convLog: ConversationLog,
+  db: Database,
+  priorSeq: number,
 ): Promise<NextResponse> {
   let stopReason = 'unknown';
   try {
@@ -345,8 +410,24 @@ async function handleNonStreaming(
       }
     }
 
-    // Save conversation to Redis
+    // Persist tail to Postgres FIRST so the conversationId we hand back is
+    // already addressable by GET /api/conversations/:id. Block on this — a
+    // failed write returns 500 rather than leaking an unrecoverable session.
     const updatedHistory = leader.getHistory();
+    const newPriorSeq = await persistConversationTail({
+      db,
+      orgId,
+      sessionId,
+      history: updatedHistory,
+      priorSeq,
+    });
+    leaderCache.set(sessionId, {
+      leader,
+      lastAccess: Date.now(),
+      priorSeq: newPriorSeq,
+    });
+
+    // Save conversation to Redis (warm cache)
     await saveConversation(orgId, sessionId, updatedHistory);
 
     const toolSummary = toolCalls.map((t) => `${t.name}:${t.status}`).join(', ');
@@ -492,6 +573,8 @@ function handleStreaming(
   adminDb: ReturnType<typeof getAdminDb>,
   agentDataSources: AgentDataSource[],
   convLog: ConversationLog,
+  db: Database,
+  priorSeq: number,
 ): Response {
   const encoder = new TextEncoder();
   const abort = new AbortController();
@@ -689,6 +772,33 @@ function handleStreaming(
                 break;
               case 'done': {
                 const history = leader.getHistory();
+                // Block the `done` event on the DB write so the client only
+                // hears about the conversation id once a GET round-trip would
+                // succeed. The plan deliberately accepts the latency hit;
+                // resume reliability is more important than turn close speed.
+                try {
+                  const newPriorSeq = await persistConversationTail({
+                    db,
+                    orgId,
+                    sessionId,
+                    history,
+                    priorSeq,
+                  });
+                  priorSeq = newPriorSeq;
+                  leaderCache.set(sessionId, {
+                    leader,
+                    lastAccess: Date.now(),
+                    priorSeq: newPriorSeq,
+                  });
+                } catch (dbErr) {
+                  console.error('[Chat] Failed to persist conversation tail:', dbErr);
+                  enqueue('error', {
+                    error:
+                      'Conversation could not be saved. Your reply rendered, but the next reload may not show it.',
+                  });
+                  streamStopReason = 'error:persist';
+                  break;
+                }
                 await saveConversation(orgId, sessionId, history);
                 enqueue('done', { stopReason: event.stopReason, conversationId: sessionId });
                 streamStopReason = event.stopReason;
@@ -811,4 +921,192 @@ async function saveConversation(orgId: string, conversationId: string, messages:
   } catch {
     // Log at debug level only — don't fail the request
   }
+}
+
+/** Hard cap on a derived conversation title — long titles wrap badly in the sidebar. */
+const TITLE_MAX_LENGTH = 60;
+
+/**
+ * Resolve the canonical conversation id for this turn. Returns the existing
+ * conversation id when one was supplied (and it belongs to this org), or
+ * inserts a new row and returns its UUID. Throws when the supplied id is
+ * not found — the caller surfaces a 500 rather than silently creating a
+ * different conversation.
+ */
+async function resolveConversationId(opts: {
+  db: Database;
+  orgId: string;
+  userId: string;
+  conversationId: string | undefined;
+  dataSourceId: string | null;
+  message: string;
+}): Promise<string> {
+  const { db, orgId, userId, conversationId, dataSourceId, message } = opts;
+
+  if (conversationId) {
+    const [existing] = await db
+      .select({ id: conversations.id })
+      .from(conversations)
+      .where(and(eq(conversations.id, conversationId), eq(conversations.orgId, orgId)))
+      .limit(1);
+    if (!existing) {
+      throw new Error(`Conversation ${conversationId} not found for this org`);
+    }
+    return existing.id;
+  }
+
+  // First turn — derive a title from the user's message and insert.
+  const title = deriveTitle(message);
+  const [created] = await db
+    .insert(conversations)
+    .values({
+      orgId,
+      createdBy: userId,
+      ...(dataSourceId ? { dataSourceId } : {}),
+      title,
+    })
+    .returning({ id: conversations.id });
+
+  if (!created) {
+    throw new Error('Failed to create conversation row');
+  }
+  return created.id;
+}
+
+/** Trim a user message into a sidebar-friendly title. */
+function deriveTitle(message: string): string {
+  const compact = message.replace(/\s+/g, ' ').trim();
+  if (!compact) return 'New conversation';
+  if (compact.length <= TITLE_MAX_LENGTH) return compact;
+  return compact.slice(0, TITLE_MAX_LENGTH).trimEnd() + '…';
+}
+
+/**
+ * Cold-start hydrate path. Tries the warm Redis mirror first; on miss, pulls
+ * the persisted history from `conversation_messages` and warms Redis for the
+ * next turn. Returns the highest sequence number observed so the caller can
+ * track what's already on disk.
+ */
+async function hydrateLeader(opts: {
+  db: Database;
+  orgId: string;
+  sessionId: string;
+  conversationId: string | undefined;
+  leader: LeaderAgent;
+}): Promise<number> {
+  const { db, orgId, sessionId, conversationId, leader } = opts;
+
+  // Brand-new conversation has no prior history to load.
+  if (!conversationId) return 0;
+
+  const cachedMessages = await loadConversation(orgId, sessionId);
+  if (cachedMessages && cachedMessages.length > 0) {
+    leader.loadHistory(cachedMessages);
+    // Look up the watermark separately — Redis has no sequence info.
+    const seq = await readMaxSequence(db, orgId, sessionId);
+    return seq;
+  }
+
+  // Redis miss — fall back to the durable store.
+  const rows = await db
+    .select({
+      role: conversationMessages.role,
+      content: conversationMessages.content,
+      toolCalls: conversationMessages.toolCalls,
+      toolResults: conversationMessages.toolResults,
+      sequence: conversationMessages.sequence,
+    })
+    .from(conversationMessages)
+    .where(
+      and(
+        eq(conversationMessages.conversationId, sessionId),
+        eq(conversationMessages.orgId, orgId),
+      ),
+    )
+    .orderBy(asc(conversationMessages.sequence));
+
+  if (rows.length === 0) return 0;
+
+  const hydrated: Message[] = rows.map((r) =>
+    hydratePersistedMessage({
+      role: r.role as Message['role'],
+      content: r.content,
+      toolCalls: r.toolCalls,
+      toolResults: r.toolResults,
+    }),
+  );
+  leader.loadHistory(hydrated);
+  // Warm Redis with the rehydrated history so the next turn skips the DB hit.
+  await saveConversation(orgId, sessionId, hydrated);
+  return rows[rows.length - 1]!.sequence;
+}
+
+/**
+ * Read the highest persisted sequence for a conversation. Used when Redis
+ * cached the leader's messages but the writer needs to know where to
+ * resume sequence numbering from.
+ */
+async function readMaxSequence(
+  db: Database,
+  orgId: string,
+  conversationId: string,
+): Promise<number> {
+  const [row] = await db
+    .select({ max: sql<number>`COALESCE(MAX(${conversationMessages.sequence}), 0)` })
+    .from(conversationMessages)
+    .where(
+      and(
+        eq(conversationMessages.conversationId, conversationId),
+        eq(conversationMessages.orgId, orgId),
+      ),
+    );
+  return row?.max ?? 0;
+}
+
+/**
+ * Persist the diff between the leader's in-memory history and what's already
+ * on disk. Inserts the tail in a single multi-row INSERT inside a
+ * transaction, bumps `conversations.last_message_at`, and returns the new
+ * `priorSeq` watermark. No-op (returns the existing watermark) when nothing
+ * new arrived — happens occasionally when the leader yields `done` without
+ * appending anything (e.g. cancelled mid-turn).
+ */
+async function persistConversationTail(opts: {
+  db: Database;
+  orgId: string;
+  sessionId: string;
+  history: Message[];
+  priorSeq: number;
+}): Promise<number> {
+  const { db, orgId, sessionId, history, priorSeq } = opts;
+  if (history.length <= priorSeq) return priorSeq;
+
+  const tail = history.slice(priorSeq);
+  const rows = toPersistedMessagesWithNames(tail, priorSeq);
+  if (rows.length === 0) return priorSeq;
+
+  await db.transaction(async (tx) => {
+    await tx.insert(conversationMessages).values(
+      rows.map((r) => ({
+        orgId,
+        conversationId: sessionId,
+        sequence: r.sequence,
+        role: r.role,
+        content: r.content,
+        toolCalls:
+          r.toolCalls && (r.toolCalls as unknown[]).length > 0 ? (r.toolCalls as unknown[]) : null,
+        toolResults:
+          r.toolResults && (r.toolResults as PersistedToolResult[]).length > 0
+            ? (r.toolResults as PersistedToolResult[])
+            : null,
+        viewSpec: r.viewSpec,
+      })),
+    );
+    await tx
+      .update(conversations)
+      .set({ lastMessageAt: new Date() })
+      .where(and(eq(conversations.id, sessionId), eq(conversations.orgId, orgId)));
+  });
+
+  return rows[rows.length - 1]!.sequence;
 }

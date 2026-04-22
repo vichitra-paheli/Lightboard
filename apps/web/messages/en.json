@@ -70,7 +70,13 @@
     "filmstripClose": "Close filmstrip",
     "filmstripOpen": "Open filmstrip",
     "filmstripPinned": "pinned",
-    "suggestionsLabel": "Follow-up suggestions"
+    "suggestionsLabel": "Follow-up suggestions",
+    "conversationsHeading": "Conversations",
+    "conversationsToday": "Today",
+    "conversationsYesterday": "Yesterday",
+    "conversationsThisWeek": "This week",
+    "conversationsOlder": "Older",
+    "conversationsEmpty": "No saved conversations yet."
   },
   "dataSources": {
     "title": "Data Sources",
